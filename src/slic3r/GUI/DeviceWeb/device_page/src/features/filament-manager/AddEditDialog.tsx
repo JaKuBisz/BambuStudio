@@ -234,6 +234,16 @@ export function AddEditDialog({
   // want can fall back to "brand-only" narrowing without losing the
   // explicit-profile feature entirely.
   const [profileTypeFilterEnabled, setProfileTypeFilterEnabled] = useState(true);
+  // When on (default), the substring match below uses only the coarse
+  // `materialType` ("PETG", "ASA", ...) rather than the full combined
+  // "Material Type" selection ("PETG Basic", "ASA Matte", ...). `series`
+  // holds that finer-grained sub-name separately (see handleTypeSeriesChange
+  // above) — most users searching the profile list are thinking in terms of
+  // the base filament family, not the specific series, so matching just the
+  // base type surfaces every compatible profile instead of only the ones
+  // whose name happens to also contain the exact series word. Unchecking
+  // this restores the narrower type+series substring match.
+  const [profileTypeFilterBaseOnly, setProfileTypeFilterBaseOnly] = useState(true);
   // Same flattened list, narrowed to the currently selected Brand +
   // Material Type so the dropdown isn't a flat wall of hundreds of
   // unrelated entries. Falls back to the full list when nothing (or
@@ -246,15 +256,16 @@ export function AddEditDialog({
   // falling back to it.
   //
   // Material Type narrowing used to require an exact `p.type` match. That's
-  // replaced with a case-insensitive substring match against the combined
-  // "Material Type" value (e.g. "PETG Basic"), matched against both the
-  // profile's display label and its bare type — this naturally covers both
-  // "just the type" (typing/picking "PETG" lists every PETG profile) and
-  // "type + series" (picking "PETG Basic" narrows to just those) without
-  // needing separate UI for the two cases.
+  // replaced with a case-insensitive substring match against either the
+  // base Material Type ("PETG") or the combined "Material Type" value
+  // ("PETG Basic") depending on `profileTypeFilterBaseOnly`, matched against
+  // both the profile's display label and its bare type.
   const filteredProfileOptions = useMemo(() => {
     const effectiveBrand = brandFreeType ? '' : brand;
-    const typeNeedle = ((series || '').trim() || (materialType || '').trim()).toLowerCase();
+    const typeNeedle = (profileTypeFilterBaseOnly
+      ? (materialType || '').trim()
+      : ((series || '').trim() || (materialType || '').trim())
+    ).toLowerCase();
     const narrowed = flattenedProfiles.filter((p) => {
       if (effectiveBrand && p.vendor !== effectiveBrand) return false;
       if (profileTypeFilterEnabled && typeNeedle) {
@@ -265,7 +276,7 @@ export function AddEditDialog({
       return true;
     });
     return narrowed.length > 0 ? narrowed : flattenedProfiles;
-  }, [flattenedProfiles, brand, brandFreeType, materialType, series, profileTypeFilterEnabled]);
+  }, [flattenedProfiles, brand, brandFreeType, materialType, series, profileTypeFilterEnabled, profileTypeFilterBaseOnly]);
   const [colorCode, setColorCode] = useState('');
   const [customColors, setCustomColors] = useState<string[]>([]);
   const [colorName, setColorName] = useState('');
@@ -2483,9 +2494,9 @@ export function AddEditDialog({
                     className="bg-fm-inner2 border-none rounded-[6px] h-[32px] pl-[8px] pr-[4px] text-fm-text-strong text-[12px] leading-[19px] outline-none w-full focus:shadow-[0_0_0_1px_var(--color-fm-brand)] fm-select-arrow cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                     value={typeSeriesFull}
                     onChange={(e) => handleTypeSeriesChange(e.target.value)}
-                    disabled={!brand || lockMaterial}
+                    disabled={(!brand && !brandFreeType) || lockMaterial}
                   >
-                    <option value="">{!brand ? t('Select Brand First') : t('Select Type')}</option>
+                    <option value="">{(!brand && !brandFreeType) ? t('Select Brand First') : t('Select Type')}</option>
                     {/* Edit 场景兜底：本地 spool 的 material_type/series 组合可能来源于
                         AMS 同步、自定义添加、或更早版本的 presets 数据，不一定出现在当前
                         brand 的 typeSeriesOptions 里。没有这个 fallback option 时 <select>
@@ -2531,6 +2542,17 @@ export function AddEditDialog({
                     onChange={(e) => setProfileTypeFilterEnabled(e.target.checked)}
                   />
                   {t('Filter profile list by Material Type')}
+                </label>
+                <label className="flex items-center gap-[6px] text-[11px] leading-[16px] text-fm-text-secondary select-none mt-[2px] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    data-testid="filament-profile-type-filter-base-only-toggle"
+                    className="cursor-pointer"
+                    checked={profileTypeFilterBaseOnly}
+                    disabled={lockBrand || lockMaterial || !profileTypeFilterEnabled}
+                    onChange={(e) => setProfileTypeFilterBaseOnly(e.target.checked)}
+                  />
+                  {t('Match base Material Type only (e.g. PETG, not PETG Basic)')}
                 </label>
               </div>
 

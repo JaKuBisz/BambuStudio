@@ -42,6 +42,7 @@
   "Filament Info": "耗材信息",
   "Filament Profile (optional)": "耗材预设（可选）",
   "Filter profile list by Material Type": "按耗材类型过滤预设列表",
+  "Match base Material Type only (e.g. PETG, not PETG Basic)": "仅按基础耗材类型匹配（例如 PETG，而非 PETG Basic）",
   "Auto (match by brand/type)": "自动（按品牌/类型匹配）",
   "Filament List": "耗材列表",
   "Filament Manager": "耗材管理",
