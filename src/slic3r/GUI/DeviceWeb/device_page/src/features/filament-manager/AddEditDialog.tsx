@@ -228,19 +228,44 @@ export function AddEditDialog({
   // one, so a stale profile can't silently stay bound to an unrelated
   // brand/type combination (see the Brand/Material onChange handlers).
   const [manualFilamentId, setManualFilamentId] = useState('');
+  // Opt-out for the Material-Type substring filter below (default on).
+  // Exposed as a checkbox next to the Filament Profile dropdown so users
+  // who hit an edge case where the substring match hides a profile they
+  // want can fall back to "brand-only" narrowing without losing the
+  // explicit-profile feature entirely.
+  const [profileTypeFilterEnabled, setProfileTypeFilterEnabled] = useState(true);
   // Same flattened list, narrowed to the currently selected Brand +
   // Material Type so the dropdown isn't a flat wall of hundreds of
   // unrelated entries. Falls back to the full list when nothing (or
   // nothing matching) is selected yet, so the control still functions
   // before Brand/Material are chosen.
+  //
+  // Brand narrowing is skipped entirely in free-type mode: a hand-typed
+  // brand can never equal `p.vendor` (a known preset vendor name), so
+  // applying it there would always empty out the list instead of just
+  // falling back to it.
+  //
+  // Material Type narrowing used to require an exact `p.type` match. That's
+  // replaced with a case-insensitive substring match against the combined
+  // "Material Type" value (e.g. "PETG Basic"), matched against both the
+  // profile's display label and its bare type — this naturally covers both
+  // "just the type" (typing/picking "PETG" lists every PETG profile) and
+  // "type + series" (picking "PETG Basic" narrows to just those) without
+  // needing separate UI for the two cases.
   const filteredProfileOptions = useMemo(() => {
+    const effectiveBrand = brandFreeType ? '' : brand;
+    const typeNeedle = ((series || '').trim() || (materialType || '').trim()).toLowerCase();
     const narrowed = flattenedProfiles.filter((p) => {
-      if (brand && p.vendor !== brand) return false;
-      if (materialType && p.type !== materialType) return false;
+      if (effectiveBrand && p.vendor !== effectiveBrand) return false;
+      if (profileTypeFilterEnabled && typeNeedle) {
+        const label = p.label.toLowerCase();
+        const type = p.type.toLowerCase();
+        if (!label.includes(typeNeedle) && !type.includes(typeNeedle)) return false;
+      }
       return true;
     });
     return narrowed.length > 0 ? narrowed : flattenedProfiles;
-  }, [flattenedProfiles, brand, materialType]);
+  }, [flattenedProfiles, brand, brandFreeType, materialType, series, profileTypeFilterEnabled]);
   const [colorCode, setColorCode] = useState('');
   const [customColors, setCustomColors] = useState<string[]>([]);
   const [colorName, setColorName] = useState('');
@@ -501,17 +526,26 @@ export function AddEditDialog({
   const typeSeriesOptions = useMemo<string[]>(() => {
     const set = new Set<string>();
 
+    // In free-type brand mode, a hand-typed brand can never equal a known
+    // vendor name, so filtering by it would always yield zero options
+    // (leaving the Material Type dropdown looking permanently empty /
+    // effectively disabled even once a brand is typed). Fall back to the
+    // union of every vendor's material types instead — the user has
+    // already told us their brand isn't in our data, so we can't narrow
+    // this list by vendor anyway.
+    const effectiveBrand = brandFreeType ? '' : brand;
+
     const settings = cloudConfig?.filamentSettings;
     if (Array.isArray(settings)) {
       settings.forEach((it) => {
         if (!it) return;
-        if (brand && it.filamentVendor !== brand) return;
+        if (effectiveBrand && it.filamentVendor !== effectiveBrand) return;
         const name = getCloudSettingDisplayName(it);
         if (name) set.add(name);
       });
     }
 
-    const vendors = brand ? presets.filter((v) => v.name === brand) : presets;
+    const vendors = effectiveBrand ? presets.filter((v) => v.name === effectiveBrand) : presets;
     vendors.forEach((v) => {
       v.types.forEach((tp) => {
         if (Array.isArray(tp.items) && tp.items.length > 0) {
@@ -530,7 +564,7 @@ export function AddEditDialog({
       });
     });
     return [...set].sort();
-  }, [brand, cloudConfig, presets, getCloudSettingDisplayName]);
+  }, [brand, brandFreeType, cloudConfig, presets, getCloudSettingDisplayName]);
 
   // Split a combined "PLA Basic" string back into (type, series) using the
   // vendor's known types as anchors (longest-first to tolerate types with
@@ -539,7 +573,8 @@ export function AddEditDialog({
     const s = (full || '').trim();
     if (!s) return { type: '', series: '' };
     const allTypes = new Set<string>();
-    const vendors = brand ? presets.filter((v) => v.name === brand) : presets;
+    const effectiveBrand = brandFreeType ? '' : brand;
+    const vendors = effectiveBrand ? presets.filter((v) => v.name === effectiveBrand) : presets;
     vendors.forEach((v) => v.types.forEach((tp) => { if (tp.name) allTypes.add(tp.name); }));
     const sortedTypes = [...allTypes].sort((a, b) => b.length - a.length);
     for (const tp of sortedTypes) {
@@ -2486,6 +2521,17 @@ export function AddEditDialog({
                     <option key={p.filament_id} value={p.filament_id}>{p.label}</option>
                   ))}
                 </select>
+                <label className="flex items-center gap-[6px] text-[11px] leading-[16px] text-fm-text-secondary select-none mt-[2px] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    data-testid="filament-profile-type-filter-toggle"
+                    className="cursor-pointer"
+                    checked={profileTypeFilterEnabled}
+                    disabled={lockBrand || lockMaterial}
+                    onChange={(e) => setProfileTypeFilterEnabled(e.target.checked)}
+                  />
+                  {t('Filter profile list by Material Type')}
+                </label>
               </div>
 
               {/* Color palette. F4.4 feedback: 自定义颜色需要"可保存 / 能看到已选"。
