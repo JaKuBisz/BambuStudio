@@ -177,13 +177,70 @@ export function AddEditDialog({
     return buildVendorOptions(presets, cloudVendors, spools);
   }, [presets, cloudConfig, spools]);
 
+  // Flattened "every known filament profile" list for the explicit Filament
+  // Profile picker (Part B). One entry per unique filament_id, sourced
+  // directly from `presets` (already includes filament_id / setting_id /
+  // name / is_user per PresetSeries.items[] — see types.ts). Deduplicated
+  // by filament_id since the same profile can legitimately be listed under
+  // more than one vendor/type bucket.
+  const flattenedProfiles = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Array<{ filament_id: string; vendor: string; type: string; label: string }> = [];
+    presets.forEach((vendor) => {
+      vendor.types.forEach((tp) => {
+        (tp.items || []).forEach((item) => {
+          const id = (item.filament_id || '').trim();
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+          const name = normalizePresetFilamentName(item.name, vendor.name, tp.name, item.series || '');
+          out.push({
+            filament_id: id,
+            vendor: vendor.name,
+            type: tp.name,
+            label: `${vendor.name} · ${name || tp.name}`,
+          });
+        });
+      });
+    });
+    return out.sort((a, b) => a.label.localeCompare(b.label));
+  }, [presets]);
+
   // Dialog mode
   const [mode, setMode] = useState<'manual' | 'ams'>('manual');
 
   // Form fields
   const [brand, setBrand] = useState('');
+  // "Can't find my brand?" free-type mode: swaps the Brand <select> for a
+  // plain text <input> so users can enter a brand that isn't in
+  // `mergedVendorNames` yet. The typed value still lives in `brand` state;
+  // this flag only controls which control renders. See the dialog-open
+  // effect below for the "auto-detect on edit" behaviour, and
+  // `mergedVendorNames` / buildVendorOptions() for why a freshly-typed brand
+  // automatically shows up as a dropdown option on the *next* dialog open
+  // (every spool's `brand` field is folded into that list already).
+  const [brandFreeType, setBrandFreeType] = useState(false);
   const [materialType, setMaterialType] = useState('');
   const [series, setSeries] = useState('');
+  // Explicit "Filament Profile" override: when non-empty, this filament_id
+  // wins over the entire auto-resolution chain (matchedCloudFilamentId /
+  // matchedPresetItem / genericFallbackFilamentId) computed further down.
+  // Cleared whenever the user changes Brand or Material Type after picking
+  // one, so a stale profile can't silently stay bound to an unrelated
+  // brand/type combination (see the Brand/Material onChange handlers).
+  const [manualFilamentId, setManualFilamentId] = useState('');
+  // Same flattened list, narrowed to the currently selected Brand +
+  // Material Type so the dropdown isn't a flat wall of hundreds of
+  // unrelated entries. Falls back to the full list when nothing (or
+  // nothing matching) is selected yet, so the control still functions
+  // before Brand/Material are chosen.
+  const filteredProfileOptions = useMemo(() => {
+    const narrowed = flattenedProfiles.filter((p) => {
+      if (brand && p.vendor !== brand) return false;
+      if (materialType && p.type !== materialType) return false;
+      return true;
+    });
+    return narrowed.length > 0 ? narrowed : flattenedProfiles;
+  }, [flattenedProfiles, brand, materialType]);
   const [colorCode, setColorCode] = useState('');
   const [customColors, setCustomColors] = useState<string[]>([]);
   const [colorName, setColorName] = useState('');
@@ -319,6 +376,18 @@ export function AddEditDialog({
       setBrand(initSpool.brand || '');
       setMaterialType(initSpool.material_type || '');
       setSeries(initSpool.series || '');
+      // Auto-detect free-type mode: if this spool's brand isn't one of the
+      // known dropdown options, show the text input immediately instead of
+      // an empty-looking select with a hidden fallback option.
+      const knownBrand = (initSpool.brand || '') && mergedVendorNames.includes(initSpool.brand || '');
+      setBrandFreeType(!!initSpool.brand && !knownBrand);
+      // Pre-select the explicit Filament Profile control only when the
+      // spool's setting_id matches a known filament_id — otherwise leave it
+      // on "Auto" and keep the raw setting_id untouched (surfaced later via
+      // the filaId resolution chain's initSpool?.setting_id fallback).
+      const savedSettingId = (initSpool.setting_id || '').trim();
+      const knownProfile = savedSettingId && flattenedProfiles.some((p) => p.filament_id === savedSettingId);
+      setManualFilamentId(knownProfile ? savedSettingId : '');
       const initialColor = normalizeColorCode(initSpool.color_code);
       setColorCode(initialColor);
       setCustomColors(initialColor && !isPresetColor(initialColor) ? [initialColor] : []);
@@ -346,6 +415,8 @@ export function AddEditDialog({
       setNote(initSpool.note || '');
     } else {
       setBrand(''); setMaterialType(''); setSeries('');
+      setBrandFreeType(false);
+      setManualFilamentId('');
       setColorCode(''); setCustomColors([]); setColorName('');
       setColors([]); setColorType(2);
       setTotalNetWeight(1000); setCurrentNetWeight(1000);
@@ -359,6 +430,7 @@ export function AddEditDialog({
     // open false→true, but that transition only happens between two
     // distinct close→open cycles, not when the parent flips initSpool
     // mid-session (e.g. detail → edit → cancel → add).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initSpool, prefilledSpool]);
 
   const findPresetMatchByFilamentId = useCallback((setting: {
@@ -554,16 +626,22 @@ export function AddEditDialog({
   // preset's setting_id is a cloud user-settings id that never matches
   // Preset::filament_id on the C++ side, whereas filament_id is exactly
   // what get_filament_by_filament_id() / the AMS gate compare against.
+  //
+  // "Filament Profile" picker: an explicit `manualFilamentId` pick is the
+  // highest-priority source — it's a new, additive branch above the
+  // existing auto-resolution chain, which stays byte-for-byte unchanged
+  // for the default "Auto" case (manualFilamentId === '').
   const filaId = useMemo(
     () => (
-      matchedCloudFilamentId
+      manualFilamentId
+      || matchedCloudFilamentId
       || matchedPresetItem?.filament_id
       || matchedPresetItem?.setting_id
       || initSpool?.setting_id
       || genericFallbackFilamentId
       || ''
     ),
-    [matchedCloudFilamentId, matchedPresetItem, initSpool?.setting_id, genericFallbackFilamentId],
+    [manualFilamentId, matchedCloudFilamentId, matchedPresetItem, initSpool?.setting_id, genericFallbackFilamentId],
   );
   const candidatesByFilaId = useStore((s) => s.filament.candidatesByFilaId);
   const setColorCandidates = useStore((s) => s.filament.setColorCandidates);
@@ -960,6 +1038,10 @@ export function AddEditDialog({
     }
     setMaterialType(type);
     setSeries(name);
+    // Changing Material Type after an explicit Filament Profile pick would
+    // leave a stale filament_id bound to an unrelated material — revert to
+    // Auto so the resolution chain re-derives a matching profile instead.
+    setManualFilamentId('');
   };
 
   // F4.5: validation no longer depends on `series` — the combined type field
@@ -1161,7 +1243,11 @@ export function AddEditDialog({
       ? Math.min(100, Math.max(0, Math.round(currentNetWeight * 100 / totalNetWeight)))
       : 0;
     const data: Partial<Spool> = {
-      brand, material_type: materialType, series,
+      // Trim here too (not just on the free-type input's onBlur) so a
+      // submit triggered without the input ever losing focus (e.g. Enter
+      // key) still avoids persisting accidental trailing/leading whitespace
+      // that would otherwise pollute the brand dropdown with near-duplicates.
+      brand: brand.trim(), material_type: materialType, series,
       color_code: colorCode, color_name: colorName,
       initial_weight: totalNetWeight,
       spool_weight: 0,
@@ -1816,6 +1902,10 @@ export function AddEditDialog({
     setColorName(tray.color_name || '');
     setFilaColorCode(tray.fila_color_code || '');
     userTouchedColorRef.current = true;
+    // AMS is authoritative for the resolved filament profile here — drop
+    // any leftover explicit "Filament Profile" pick from a previous manual
+    // session so it can't silently override the tray's own setting_id.
+    setManualFilamentId('');
 
     // Seed both weight inputs from the AMS tray report. `tray.weight` is
     // the spool's original 整卷净重 (MQTT `tray_weight`, always net); the
@@ -2295,22 +2385,56 @@ export function AddEditDialog({
               <div className="flex gap-[12px]">
                 <div className="flex flex-col gap-[4px] flex-1 pb-[24px]">
                   <label className="text-[12px] leading-[19px] text-fm-text-secondary"><span className="text-[#ff2b00]">*</span> {t('Brand')}</label>
-                  <select
-                    data-testid="filament-brand"
-                    className="bg-fm-inner2 border-none rounded-[6px] h-[32px] pl-[8px] pr-[4px] text-fm-text-strong text-[12px] leading-[19px] outline-none w-full focus:shadow-[0_0_0_1px_var(--color-fm-brand)] fm-select-arrow cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-                    value={brand}
-                    disabled={lockBrand}
-                    onChange={(e) => {
-                      setBrand(e.target.value);
-                      if (!lockMaterial) {
-                        setMaterialType('');
-                        setSeries('');
-                      }
-                    }}
-                  >
-                    <option value="">{t('Select Brand')}</option>
-                    {mergedVendorNames.map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
+                  {brandFreeType ? (
+                    <input
+                      type="text"
+                      data-testid="filament-brand-freetext"
+                      className="bg-fm-inner2 border-none rounded-[6px] h-[32px] pl-[8px] pr-[4px] text-fm-text-strong text-[12px] leading-[19px] outline-none w-full focus:shadow-[0_0_0_1px_var(--color-fm-brand)] disabled:cursor-not-allowed disabled:opacity-60"
+                      value={brand}
+                      disabled={lockBrand}
+                      maxLength={64}
+                      placeholder={t('Enter Brand Name')}
+                      onChange={(e) => setBrand(e.target.value)}
+                      onBlur={(e) => setBrand(e.target.value.trim())}
+                    />
+                  ) : (
+                    <select
+                      data-testid="filament-brand"
+                      className="bg-fm-inner2 border-none rounded-[6px] h-[32px] pl-[8px] pr-[4px] text-fm-text-strong text-[12px] leading-[19px] outline-none w-full focus:shadow-[0_0_0_1px_var(--color-fm-brand)] fm-select-arrow cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                      value={brand}
+                      disabled={lockBrand}
+                      onChange={(e) => {
+                        setBrand(e.target.value);
+                        if (!lockMaterial) {
+                          setMaterialType('');
+                          setSeries('');
+                        }
+                        setManualFilamentId('');
+                      }}
+                    >
+                      <option value="">{t('Select Brand')}</option>
+                      {/* Mirrors the Material Type fallback-echo idiom below:
+                          when the current brand was free-typed and doesn't
+                          match a known vendor, inject it as a synthetic
+                          option so toggling the checkbox off never silently
+                          discards the typed value. */}
+                      {brand && !mergedVendorNames.includes(brand) && (
+                        <option value={brand}>{brand}</option>
+                      )}
+                      {mergedVendorNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  )}
+                  <label className="flex items-center gap-[6px] text-[11px] leading-[16px] text-fm-text-secondary select-none mt-[2px] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      data-testid="filament-brand-freetype-toggle"
+                      className="cursor-pointer"
+                      checked={brandFreeType}
+                      disabled={lockBrand}
+                      onChange={(e) => setBrandFreeType(e.target.checked)}
+                    />
+                    {t("Can't find my brand? Type it manually")}
+                  </label>
                 </div>
                 <div className="flex flex-col gap-[4px] flex-1 pb-[24px]">
                   <label className="text-[12px] leading-[19px] text-fm-text-secondary"><span className="text-[#ff2b00]">*</span> {t('Material Type')}</label>
@@ -2338,6 +2462,30 @@ export function AddEditDialog({
                     {typeSeriesOptions.map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </div>
+              </div>
+
+              {/* Explicit "Filament Profile" override (Part B): lets the
+                  user directly pick which saved filament_id this spool
+                  resolves to, bypassing the brand+type auto-match chain.
+                  Purely additive/opt-in — left on "Auto" this changes
+                  nothing about existing behaviour. Disabled under the same
+                  conditions as Brand/Material Type (AMS-locked / RFID-edit)
+                  since a manual override would fight the authoritative
+                  AMS/RFID-resolved setting_id in those cases. */}
+              <div className="flex flex-col gap-[4px] pb-[24px]">
+                <label className="text-[12px] leading-[19px] text-fm-text-secondary">{t('Filament Profile (optional)')}</label>
+                <select
+                  data-testid="filament-profile"
+                  className="bg-fm-inner2 border-none rounded-[6px] h-[32px] pl-[8px] pr-[4px] text-fm-text-strong text-[12px] leading-[19px] outline-none w-full focus:shadow-[0_0_0_1px_var(--color-fm-brand)] fm-select-arrow cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  value={manualFilamentId}
+                  disabled={lockBrand || lockMaterial}
+                  onChange={(e) => setManualFilamentId(e.target.value)}
+                >
+                  <option value="">{t('Auto (match by brand/type)')}</option>
+                  {filteredProfileOptions.map((p) => (
+                    <option key={p.filament_id} value={p.filament_id}>{p.label}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Color palette. F4.4 feedback: 自定义颜色需要"可保存 / 能看到已选"。
