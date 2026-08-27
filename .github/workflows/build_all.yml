@@ -4,6 +4,7 @@ on:
   push:
     branches:
      - master
+     - dev
     paths:
      - 'deps/**'
      - 'src/**'
@@ -48,15 +49,15 @@ on:
             type: boolean
             default: true
         macos-intel:
-            description: 'macOS 15 (Intel, x86_64)'
+            description: 'macOS 15 (Intel only, x86_64)'
             type: boolean
             default: true
-        macos-15-arm:
-            description: 'macOS 15 (Apple Silicon, arm64)'
+        macos-15-universal:
+            description: 'macOS 15 (Universal: arm64 + x86_64)'
             type: boolean
             default: true
-        macos-26-arm:
-            description: 'macOS 26 (Apple Silicon, arm64)'
+        macos-26-universal:
+            description: 'macOS 26 (Universal: arm64 + x86_64)'
             type: boolean
             default: true
 
@@ -97,8 +98,8 @@ jobs:
           [ "$(include '${{ inputs.ubuntu-26-04 }}')" = "true" ] && add "ubuntu-26.04" ""
           [ "$(include '${{ inputs.windows }}')" = "true" ] && add "windows-latest" ""
           [ "$(include '${{ inputs.macos-intel }}')" = "true" ] && add "macos-15-intel" "x86_64"
-          [ "$(include '${{ inputs.macos-15-arm }}')" = "true" ] && add "macos-15" "arm64"
-          [ "$(include '${{ inputs.macos-26-arm }}')" = "true" ] && add "macos-26" "arm64"
+          [ "$(include '${{ inputs.macos-15-universal }}')" = "true" ] && add "macos-15" "universal"
+          [ "$(include '${{ inputs.macos-26-universal }}')" = "true" ] && add "macos-26" "universal"
 
           echo "matrix={\"include\":$entries}" >> "$GITHUB_OUTPUT"
           echo "Selected matrix: $entries"
