@@ -5,20 +5,34 @@ on:
     # Check every 6 hours for new upstream releases
     - cron: '0 */6 * * *'
   workflow_dispatch: # Allow manual trigger
+  pull_request:
+    # Fires when an upstream-sync/* PR lands on master (via auto-merge or a
+    # manual/Copilot-resolved merge). This is the trigger for the actual
+    # release step -- separate from the "sync" job below, since with
+    # auto-merge the PR may land minutes/hours after the sync job runs,
+    # not synchronously in the same workflow run.
+    types: [closed]
+    branches:
+      - master
 
 permissions:
   contents: write
   actions: read
+  pull-requests: write
+  issues: write
 
 jobs:
   sync:
     name: Sync with upstream
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       new-release: ${{ steps.check.outputs.new-release }}
       upstream-tag: ${{ steps.check.outputs.upstream-tag }}
       release-name: ${{ steps.check.outputs.release-name }}
       release-body: ${{ steps.check.outputs.release-body }}
+      pr-number: ${{ steps.pr.outputs.pr-number }}
+      pr-clean: ${{ steps.merge.outputs.clean }}
     steps:
       - name: Checkout fork
         uses: actions/checkout@v6
@@ -87,30 +101,151 @@ jobs:
             echo 'RELEASE_BODY_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Merge upstream into fork
+      - name: Merge upstream into a sync branch and open a PR
+        id: merge
         if: steps.check.outputs.new-release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           UPSTREAM_TAG="${{ steps.check.outputs.upstream-tag }}"
+          BRANCH="upstream-sync/$UPSTREAM_TAG"
 
-          echo "Merging upstream tag $UPSTREAM_TAG into master..."
-          git merge "$UPSTREAM_TAG" --no-edit -m "Merge upstream release $UPSTREAM_TAG" || {
-            echo "::error::Merge conflict detected! Manual intervention required."
-            echo "Run: git fetch upstream --tags && git merge $UPSTREAM_TAG"
-            exit 1
-          }
+          git checkout -b "$BRANCH"
 
-          git push origin master
-          echo "Successfully merged and pushed $UPSTREAM_TAG"
+          if git merge "$UPSTREAM_TAG" --no-edit -m "Merge upstream release $UPSTREAM_TAG into master"; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+            echo "Merge was clean."
+          else
+            # Leave conflict markers in place instead of aborting, so the PR
+            # diff shows exactly what needs manual (or Copilot-assisted)
+            # resolution. The "Build all" PR check will fail here as
+            # expected (conflict markers don't compile) -- that's the
+            # visible signal that this PR still needs work.
+            git add -A
+            git commit -m "Merge upstream release $UPSTREAM_TAG into master (CONFLICTS - needs resolution)"
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Merge conflict detected for $UPSTREAM_TAG - opening PR for manual/Copilot resolution."
+          fi
 
-  # The push to master triggers "Build all" automatically.
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Open sync PR
+        id: pr
+        if: steps.check.outputs.new-release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          UPSTREAM_TAG="${{ steps.check.outputs.upstream-tag }}"
+          BRANCH="${{ steps.merge.outputs.branch }}"
+          CLEAN="${{ steps.merge.outputs.clean }}"
+
+          if [ "$CLEAN" = "true" ]; then
+            BODY="Automated merge of upstream release **$UPSTREAM_TAG** into \`master\`. Merged cleanly - will auto-merge once \`Build all\` passes on this PR."
+          else
+            BODY="Automated merge of upstream release **$UPSTREAM_TAG** into \`master\` hit merge conflicts. Conflict markers were committed as-is on this branch so they're visible in the diff - please resolve them here (or assign to Copilot) and merge manually. The \`Build all\` check on this PR is expected to fail until conflicts are resolved."
+          fi
+
+          PR_URL=$(gh pr create \
+            --base master \
+            --head "$BRANCH" \
+            --title "Sync upstream release $UPSTREAM_TAG" \
+            --body "$BODY" \
+            --label "upstream-sync" 2>&1) || {
+              echo "::error::Failed to create PR: $PR_URL"
+              exit 1
+            }
+          echo "Opened PR: $PR_URL"
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          echo "pr-number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+          if [ "$CLEAN" = "true" ]; then
+            # Requires repo setting "Allow auto-merge" to be enabled once in
+            # Settings > General. If branch protection on master requires the
+            # "Build all" status check, this waits for it to pass before
+            # actually merging - so conflicts AND build breakage both get
+            # caught before landing on master.
+            gh pr merge "$PR_NUMBER" --auto --merge || \
+              echo "::warning::Could not enable auto-merge (enable 'Allow auto-merge' in repo Settings > General, and add master branch protection requiring the 'Build all' check). PR is still open for manual merge."
+          else
+            gh pr edit "$PR_NUMBER" --add-label "needs-manual-resolution" || true
+            # Best-effort: try to assign this PR to Copilot coding agent for an
+            # automated conflict-resolution attempt. This depends on Copilot
+            # coding agent being enabled for this repo and the exact bot login
+            # GitHub exposes for it - if it's not available/enabled, this is a
+            # no-op and the PR just stays open for manual resolution instead.
+            gh pr edit "$PR_NUMBER" --add-assignee "copilot-swe-agent[bot]" 2>/dev/null || \
+              gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/assignees" \
+                -f "assignees[]=copilot-swe-agent[bot]" >/dev/null 2>&1 || \
+              echo "::notice::Could not auto-assign Copilot (not enabled, or login differs) - resolve $BRANCH manually."
+          fi
+
+  # Triggered when an upstream-sync/* PR merges into master (see the
+  # `pull_request: types: [closed]` trigger above). Waits for the resulting
+  # "Build all" run on master and creates the full release from its artifacts.
+  finalize-release:
+    name: Finalize release after sync PR merge
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'upstream-sync/')
+    runs-on: ubuntu-latest
+    outputs:
+      upstream-tag: ${{ steps.info.outputs.upstream-tag }}
+      release-name: ${{ steps.info.outputs.release-name }}
+      release-body: ${{ steps.info.outputs.release-body }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Recompute release info for the merged tag
+        id: info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          UPSTREAM_TAG="${GITHUB_HEAD_REF#upstream-sync/}"
+          echo "upstream-tag=$UPSTREAM_TAG" >> "$GITHUB_OUTPUT"
+
+          RELEASE=$(gh release view "$UPSTREAM_TAG" --repo bambulab/BambuStudio --json name,body -q '.')
+          RELEASE_NAME=$(echo "$RELEASE" | jq -r '.name')
+          RELEASE_BODY=$(echo "$RELEASE" | jq -r '.body')
+          echo "release-name=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
+
+          REPO_URL="${{ github.server_url }}/${{ github.repository }}"
+          {
+            echo 'release-body<<RELEASE_BODY_EOF'
+            echo "> 🛠️ **OpenStudio** — [${{ github.repository }}]($REPO_URL) fork of BambuStudio with extra features."
+            echo "> This release is kept in sync with the official [bambulab/BambuStudio](https://github.com/bambulab/BambuStudio) releases."
+            echo ""
+            echo "## Running the macOS app"
+            echo ""
+            echo "The macOS build is ad-hoc signed (not notarized by Apple), so Gatekeeper will"
+            echo "warn that it \"cannot be verified\" or \"is malware\" on first launch. To run it:"
+            echo ""
+            echo "1. Open the \`.dmg\` and drag the app to \`/Applications\`."
+            echo "2. Try to open it once (it will be blocked) — then go to"
+            echo "   **System Settings > Privacy & Security > Open Anyway**, or"
+            echo "3. Alternatively, run this once from Terminal after installing:"
+            echo "   \`xattr -cr /Applications/OpenStudio.app\`"
+            echo ""
+            echo "---"
+            echo ""
+            echo "$RELEASE_BODY"
+            echo 'RELEASE_BODY_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  # The merge to master (above) triggers "Build all" automatically.
   # Wait for it to finish, then collect artifacts and create a full release.
   wait-for-build:
     name: Wait for Build
-    needs: sync
-    if: needs.sync.outputs.new-release == 'true'
+    needs: finalize-release
+    if: needs.finalize-release.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       build-run-id: ${{ steps.wait.outputs.run-id }}
@@ -161,7 +296,7 @@ jobs:
 
   release:
     name: Create Full Release
-    needs: [sync, wait-for-build]
+    needs: [finalize-release, wait-for-build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -185,8 +320,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ needs.sync.outputs.upstream-tag }}"
-          RELEASE_NAME="${{ needs.sync.outputs.release-name }}"
+          TAG="${{ needs.finalize-release.outputs.upstream-tag }}"
+          RELEASE_NAME="${{ needs.finalize-release.outputs.release-name }}"
 
           # Create tag if it doesn't exist
           git tag "$TAG" 2>/dev/null || true
@@ -202,13 +337,13 @@ jobs:
           if [ -n "$ASSETS" ]; then
             gh release create "$TAG" \
               --title "$RELEASE_NAME" \
-              --notes "${{ needs.sync.outputs.release-body }}" \
+              --notes "${{ needs.finalize-release.outputs.release-body }}" \
               --generate-notes \
               $ASSETS
           else
             gh release create "$TAG" \
               --title "$RELEASE_NAME" \
-              --notes "${{ needs.sync.outputs.release-body }}" \
+              --notes "${{ needs.finalize-release.outputs.release-body }}" \
               --generate-notes
           fi
 
