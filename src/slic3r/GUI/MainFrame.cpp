@@ -304,7 +304,7 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
     default:
     case GUI_App::EAppMode::Editor:
         m_taskbar_icon = std::make_unique<BambuStudioTaskBarIcon>(wxTBI_DOCK);
-        m_taskbar_icon->SetIcon(wxIcon(Slic3r::var("BambuStudio-mac_256px.ico"), wxBITMAP_TYPE_ICO), "BambuStudio");
+        m_taskbar_icon->SetIcon(wxIcon(Slic3r::var("BambuStudio-mac_256px.ico"), wxBITMAP_TYPE_ICO), SLIC3R_APP_NAME);
         break;
     case GUI_App::EAppMode::GCodeViewer:
         break;
@@ -1202,8 +1202,8 @@ void MainFrame::update_title()
     if (m_topbar)
         m_topbar->SetTitle(title);
     // Also reflect the "*" in the window/taskbar title, which set_project_name builds
-    // as "<name> - BambuStudio".
-    SetTitle(title + " - BambuStudio");
+    // as "<name> - <app name>".
+    SetTitle(title + " - " + SLIC3R_APP_NAME);
 #else
     SetTitle(title);
 #ifdef __APPLE__
