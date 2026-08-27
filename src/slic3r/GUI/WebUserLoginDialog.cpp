@@ -40,7 +40,7 @@ END_EVENT_TABLE()
 
 int ZUserLogin::web_sequence_id = 20000;
 
-ZUserLogin::ZUserLogin() : wxDialog((wxWindow *) (wxGetApp().mainframe), wxID_ANY, "BambuStudio")
+ZUserLogin::ZUserLogin() : wxDialog((wxWindow *) (wxGetApp().mainframe), wxID_ANY, SLIC3R_APP_NAME)
 {
     SetBackgroundColour(*wxWHITE);
     // Url
