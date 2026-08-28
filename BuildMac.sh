@@ -178,15 +178,15 @@ function build_slicer() {
             mkdir -p BambuStudio
             cd BambuStudio
             # remove previously built app
-            rm -rf ./BambuStudio.app
+            rm -rf ./OpenStudio.app
             # fully copy newly built app
-            cp -pR "../src$BUILD_DIR_CONFIG_SUBDIR/BambuStudio.app" ./BambuStudio.app
+            cp -pR "../src$BUILD_DIR_CONFIG_SUBDIR/OpenStudio.app" ./OpenStudio.app
             # fix resources
-            resources_path=$(readlink ./BambuStudio.app/Contents/Resources)
-            rm ./BambuStudio.app/Contents/Resources
-            cp -R "$resources_path" ./BambuStudio.app/Contents/Resources
+            resources_path=$(readlink ./OpenStudio.app/Contents/Resources)
+            rm ./OpenStudio.app/Contents/Resources
+            cp -R "$resources_path" ./OpenStudio.app/Contents/Resources
             # delete .DS_Store file
-            find ./BambuStudio.app/ -name '.DS_Store' -delete
+            find ./OpenStudio.app/ -name '.DS_Store' -delete
         )
 
     fi
@@ -202,17 +202,17 @@ function build_universal() {
     echo "Creating universal binary..."
     # PROJECT_BUILD_DIR="$PROJECT_DIR/build_Universal"
     mkdir -p "$PROJECT_BUILD_DIR/BambuStudio"
-    UNIVERSAL_APP="$PROJECT_BUILD_DIR/BambuStudio/BambuStudio.app"
+    UNIVERSAL_APP="$PROJECT_BUILD_DIR/BambuStudio/OpenStudio.app"
     rm -rf "$UNIVERSAL_APP"
-    cp -R "$PROJECT_DIR/build/arm64/BambuStudio/BambuStudio.app" "$UNIVERSAL_APP"
+    cp -R "$PROJECT_DIR/build/arm64/BambuStudio/OpenStudio.app" "$UNIVERSAL_APP"
     
     # Get the binary path inside the .app bundle
-    BINARY_PATH="Contents/MacOS/BambuStudio"
+    BINARY_PATH="Contents/MacOS/OpenStudio"
     
     # Create universal binary using lipo
     lipo -create \
-        "$PROJECT_DIR/build/x86_64/BambuStudio/BambuStudio.app/$BINARY_PATH" \
-        "$PROJECT_DIR/build/arm64/BambuStudio/BambuStudio.app/$BINARY_PATH" \
+        "$PROJECT_DIR/build/x86_64/BambuStudio/OpenStudio.app/$BINARY_PATH" \
+        "$PROJECT_DIR/build/arm64/BambuStudio/OpenStudio.app/$BINARY_PATH" \
         -output "$UNIVERSAL_APP/$BINARY_PATH"
         
     echo "Universal binary created at $UNIVERSAL_APP"

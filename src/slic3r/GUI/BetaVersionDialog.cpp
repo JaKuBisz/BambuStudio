@@ -153,13 +153,13 @@ void BetaVersionDialog::updateContent(const wxString &available_version,
                                       const wxString &current_version)
 {
     m_heading_label->SetLabel(
-        wxString::Format(_L("New Bambu Studio Beta Available") + wxString(": %s"), available_version));
+        wxString::Format(_L("New OpenStudio Beta Available") + wxString(": %s"), available_version));
 
     m_version_label->SetLabel(
         wxString::Format(_L("Current Version") + wxString(": %s"), current_version));
 
     m_overview_label->SetLabel(
-        _L("Bambu Studio Beta gives you early access to upcoming features, improvements, optimizations, and bug fixes before they are released in the stable version of Bambu Studio. "
+        _L("OpenStudio Beta gives you early access to upcoming features, improvements, optimizations, and bug fixes before they are released in the stable version of OpenStudio. "
            "It is intended for advanced users who would like to explore new functionality early and help improve the software experience."));
 
     m_detail_sizer->Clear(true);
@@ -171,8 +171,8 @@ void BetaVersionDialog::updateContent(const wxString &available_version,
     createDetailItem(m_detail_sizer, m_detail_panel, 1,
         _L("Separate configuration folder."),
         _L("As a beta release, some features may still be under development, and you may occasionally encounter bugs, unexpected behavior, or incomplete functionality. "
-            "To prevent conflicts with the stable release, Bambu Studio Beta uses a separate configuration folder "
-            "(Help -> Show Configuration Folder) and operates independently from the standard version of Bambu Studio."),
+            "To prevent conflicts with the stable release, OpenStudio Beta uses a separate configuration folder "
+            "(Help -> Show Configuration Folder) and operates independently from the standard version of OpenStudio."),
         _L("(Help -> Show Configuration Folder)"));
 
     m_detail_sizer->Add(0, 0, 0, wxTOP, FromDIP(DETAIL_ITEM_GAP));

@@ -165,7 +165,7 @@ static int draw_brand_icon_and_strip(wxDC& dc, wxWindow* win, wxString& name, in
     int icon_sz = win->FromDIP(16);
     if (name.StartsWith("Bambu ")) {
         name = name.Mid(6);
-        wxBitmap bmp = create_scaled_bitmap("BambuStudioBlack", win, 16);
+        wxBitmap bmp = create_scaled_bitmap("OpenStudio_192px.png", win, 16);
         if (bmp.IsOk())
             dc.DrawBitmap(bmp, x, cy - icon_sz / 2, true);
         x += icon_sz + win->FromDIP(4);

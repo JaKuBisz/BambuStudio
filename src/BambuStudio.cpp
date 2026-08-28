@@ -8277,13 +8277,13 @@ bool CLI::setup(int argc, char **argv)
     // We hope that if a DLL is being injected into a BambuStudio process, it happens at the very start of the application,
     // thus we shall detect them now.
     if (BlacklistedLibraryCheck::get_instance().perform_check()) {
-        std::wstring text = L"Following DLLs have been injected into the BambuStudio process:\n\n";
+        std::wstring text = L"Following DLLs have been injected into the " SLIC3R_APP_NAME L" process:\n\n";
         text += BlacklistedLibraryCheck::get_instance().get_blacklisted_string();
         text += L"\n\n"
-                L"BambuStudio is known to not run correctly with these DLLs injected. "
+                SLIC3R_APP_NAME L" is known to not run correctly with these DLLs injected. "
                 L"We suggest stopping or uninstalling these services if you experience "
-                L"crashes or unexpected behaviour while using BambuStudio.\n"
-                L"For example, ASUS Sonic Studio injects a Nahimic driver, which makes BambuStudio "
+                L"crashes or unexpected behaviour while using " SLIC3R_APP_NAME L".\n"
+                L"For example, ASUS Sonic Studio injects a Nahimic driver, which makes " SLIC3R_APP_NAME L" "
                 L"to crash on a secondary monitor";
         MessageBoxW(NULL, text.c_str(), L"Warning"/*L"Incopatible library found"*/, MB_OK);
     }
@@ -8628,9 +8628,9 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 }*/
 
 // BBS: out-of-memory new-handler, installed on every platform
-#define BBL_OOM_TITLE "Bambu Studio - Out of Memory"
+#define BBL_OOM_TITLE SLIC3R_APP_FULL_NAME " - Out of Memory"
 #define BBL_OOM_BODY \
-    "Bambu Studio has run out of memory and must close.\n\n" \
+    SLIC3R_APP_FULL_NAME " has run out of memory and must close.\n\n" \
     "Your project may be too large for the available memory. " \
     "Try closing other applications, reducing the model complexity " \
     "or plate count, and restart."
