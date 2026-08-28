@@ -100,8 +100,23 @@ else
     export BUILD_DIR_CONFIG_SUBDIR=""
 fi
 
+# Wait for background per-arch build jobs; fail if any of them failed.
+function wait_for_arch_jobs() {
+    local rc=0
+    for pid in "$@"; do
+        if ! wait "$pid"; then
+            rc=1
+        fi
+    done
+    if [ "$rc" -ne 0 ]; then
+        echo "Error: build failed for at least one architecture" >&2
+        exit 1
+    fi
+}
+
 function build_deps() {
-    # iterate over two architectures: x86_64 and arm64
+    # iterate over two architectures: x86_64 and arm64 (concurrently for universal builds)
+    local pids=()
     for _ARCH in x86_64 arm64; do
         # if ARCH is universal or equal to _ARCH
         if [ "$ARCH" == "universal" ] || [ "$ARCH" == "$_ARCH" ]; then
@@ -110,7 +125,7 @@ function build_deps() {
             DEPS_BUILD_DIR="$DEPS_DIR/build/$_ARCH"
             DEPS="$DEPS_BUILD_DIR/BambuStudio_deps"
 
-            echo "Building deps..."
+            echo "Building deps for $_ARCH..."
             (
                 set -x
                 mkdir -p "$DEPS"
@@ -125,9 +140,11 @@ function build_deps() {
                         -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}"
                 fi
                 cmake --build . --parallel ${CMAKE_BUILD_PARALLEL_LEVEL} --config "$BUILD_CONFIG" --target deps
-            )
+            ) &
+            pids+=($!)
         fi
     done
+    wait_for_arch_jobs "${pids[@]}"
 }
 
 function pack_deps() {
@@ -140,7 +157,8 @@ function pack_deps() {
 }
 
 function build_slicer() {
-    # iterate over two architectures: x86_64 and arm64
+    # iterate over two architectures: x86_64 and arm64 (concurrently for universal builds)
+    local pids=()
     for _ARCH in x86_64 arm64; do
         # if ARCH is universal or equal to _ARCH
         if [ "$ARCH" == "universal" ] || [ "$ARCH" == "$_ARCH" ]; then
@@ -152,45 +170,43 @@ function build_slicer() {
             echo "Building slicer for $_ARCH..."
             (
                 set -x
-            mkdir -p "$PROJECT_BUILD_DIR"
-            cd "$PROJECT_BUILD_DIR"
-            if [ "1." != "$BUILD_ONLY". ]; then
-                cmake "${PROJECT_DIR}" \
-                    -G "${SLICER_CMAKE_GENERATOR}" \
-                    -DBBL_RELEASE_TO_PUBLIC=1 \
-                    -DBBL_INTERNAL_TESTING=0 \
-                    -DCMAKE_PREFIX_PATH="$DEPS/usr/local" \
-                    -DCMAKE_INSTALL_PREFIX="$PWD/BambuStudio" \
-                    -DCMAKE_BUILD_TYPE="$BUILD_CONFIG" \
-                    -DCMAKE_MACOSX_RPATH=ON \
-                    -DCMAKE_INSTALL_RPATH="${DEPS}/usr/local" \
-                    -DCMAKE_MACOSX_BUNDLE=ON \
-                    -DCMAKE_OSX_ARCHITECTURES="${_ARCH}" \
-                    -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}"
-            fi
-            cmake --build . --config "$BUILD_CONFIG" --target "$SLICER_BUILD_TARGET"
-        )
+                mkdir -p "$PROJECT_BUILD_DIR"
+                cd "$PROJECT_BUILD_DIR"
+                if [ "1." != "$BUILD_ONLY". ]; then
+                    cmake "${PROJECT_DIR}" \
+                        -G "${SLICER_CMAKE_GENERATOR}" \
+                        -DBBL_RELEASE_TO_PUBLIC=1 \
+                        -DBBL_INTERNAL_TESTING=0 \
+                        -DCMAKE_PREFIX_PATH="$DEPS/usr/local" \
+                        -DCMAKE_INSTALL_PREFIX="$PWD/BambuStudio" \
+                        -DCMAKE_BUILD_TYPE="$BUILD_CONFIG" \
+                        -DCMAKE_MACOSX_RPATH=ON \
+                        -DCMAKE_INSTALL_RPATH="${DEPS}/usr/local" \
+                        -DCMAKE_MACOSX_BUNDLE=ON \
+                        -DCMAKE_OSX_ARCHITECTURES="${_ARCH}" \
+                        -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}"
+                fi
+                cmake --build . --config "$BUILD_CONFIG" --target "$SLICER_BUILD_TARGET"
 
-
-        echo "Fix macOS app package..."
-        (
-            cd "$PROJECT_BUILD_DIR"
-            mkdir -p BambuStudio
-            cd BambuStudio
-            # remove previously built app
-            rm -rf ./OpenStudio.app
-            # fully copy newly built app
-            cp -pR "../src$BUILD_DIR_CONFIG_SUBDIR/OpenStudio.app" ./OpenStudio.app
-            # fix resources
-            resources_path=$(readlink ./OpenStudio.app/Contents/Resources)
-            rm ./OpenStudio.app/Contents/Resources
-            cp -R "$resources_path" ./OpenStudio.app/Contents/Resources
-            # delete .DS_Store file
-            find ./OpenStudio.app/ -name '.DS_Store' -delete
-        )
-
-    fi
+                echo "Fix macOS app package ($_ARCH)..."
+                cd "$PROJECT_BUILD_DIR"
+                mkdir -p BambuStudio
+                cd BambuStudio
+                # remove previously built app
+                rm -rf ./OpenStudio.app
+                # fully copy newly built app
+                cp -pR "../src$BUILD_DIR_CONFIG_SUBDIR/OpenStudio.app" ./OpenStudio.app
+                # fix resources
+                resources_path=$(readlink ./OpenStudio.app/Contents/Resources)
+                rm ./OpenStudio.app/Contents/Resources
+                cp -R "$resources_path" ./OpenStudio.app/Contents/Resources
+                # delete .DS_Store file
+                find ./OpenStudio.app/ -name '.DS_Store' -delete
+            ) &
+            pids+=($!)
+        fi
     done
+    wait_for_arch_jobs "${pids[@]}"
 }
 
 function build_universal() {

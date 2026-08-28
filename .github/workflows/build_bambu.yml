@@ -73,6 +73,47 @@ jobs:
           echo "date: ${{ env.date }} version: ${{ env.ver }}"
         shell: pwsh
 
+      # Compiler cache. Use the static sccache binary (brew's ccache links
+      # zstd, which the deps workflow uninstalls; sccache has no such issue).
+      - name: Cache compiler cache (macOS)
+        if: inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26'
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: ${{ inputs.os }}-sccache-${{ github.sha }}
+          restore-keys: |
+            ${{ inputs.os }}-sccache-
+
+      - name: Install sccache (macOS)
+        if: inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26'
+        run: |
+          if [ "$(uname -m)" == "arm64" ]; then SCCACHE_ARCH=aarch64; else SCCACHE_ARCH=x86_64; fi
+          mkdir -p "$RUNNER_TEMP/sccache-bin"
+          curl -sSL "https://github.com/mozilla/sccache/releases/download/v0.17.0/sccache-v0.17.0-${SCCACHE_ARCH}-apple-darwin.tar.gz" \
+            | tar xzf - -C "$RUNNER_TEMP/sccache-bin" --strip-components=1
+          echo "SCCACHE_DIR=$GITHUB_WORKSPACE/.sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=2G" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=$RUNNER_TEMP/sccache-bin/sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=$RUNNER_TEMP/sccache-bin/sccache" >> "$GITHUB_ENV"
+
+      - name: Cache compiler cache (Linux)
+        if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04'
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ${{ inputs.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ inputs.os }}-ccache-
+
+      - name: Install ccache (Linux)
+        if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04'
+        run: |
+          if ! command -v ccache >/dev/null; then sudo apt-get update && sudo apt-get install -y ccache; fi
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+
   #   Mac
       - name: Build slicer mac
         if: inputs.os == 'macos-15-intel'
@@ -85,7 +126,8 @@ jobs:
           brew install $USER/old-cmake/cmake@3.31.0
           brew link --overwrite cmake@3.31.0
           brew pin cmake@3.31.0
-          ./BuildMac.sh -s -x -a x86_64 -t 10.15 -1
+          ./BuildMac.sh -s -x -a x86_64 -t 10.15
+          "$RUNNER_TEMP/sccache-bin/sccache" --show-stats || true
 
       - name: Build slicer mac
         if: inputs.os == 'macos-15' || inputs.os == 'macos-26'
@@ -98,7 +140,8 @@ jobs:
           brew install $USER/old-cmake/cmake@3.31.0
           brew link --overwrite cmake@3.31.0
           brew pin cmake@3.31.0
-          ./BuildMac.sh -s -x -a universal -t 10.15 -1
+          ./BuildMac.sh -s -x -a universal -t 10.15
+          "$RUNNER_TEMP/sccache-bin/sccache" --show-stats || true
 
       - name: pack mac dmg
         if: github.ref != 'refs/heads/main' && (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26')
@@ -199,6 +242,7 @@ jobs:
         shell: bash
         run: |
           ./BuildLinux.sh -isfr
+          ccache --show-stats || true
           mv -n ./build/OpenStudio_ubu64.AppImage ./build/OpenStudio_${{inputs.os}}_${{ env.ver }}.AppImage
 
       # - name: Build orca_custom_preset_tests
