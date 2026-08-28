@@ -1282,7 +1282,7 @@ void PlaterPresetComboBox::update()
     //    add_connected_printers("", true);
     bool selected_in_ams = false;
     if (m_type == Preset::TYPE_FILAMENT) {
-        set_replace_text("Bambu", "BambuStudioBlack");
+        set_replace_text("Bambu", "OpenStudio_192px.png");
         selected_in_ams = add_ams_filaments(into_u8(selected_user_preset.empty() ? selected_system_preset : selected_user_preset), true);
     }
 

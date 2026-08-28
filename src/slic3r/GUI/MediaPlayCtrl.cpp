@@ -728,7 +728,7 @@ void MediaPlayCtrl::ToggleStream()
         }
     }
     if (!url.empty() && wxGetApp().app_config->get("not_show_vcamera_stop_prev") != "1") {
-        MessageDialog dlg(this->GetParent(), _L("Another virtual camera is running.\nBambu Studio supports only a single virtual camera.\nDo you want to stop this virtual camera?"), _L("Warning"),
+        MessageDialog dlg(this->GetParent(), _L("Another virtual camera is running.\nOpenStudio supports only a single virtual camera.\nDo you want to stop this virtual camera?"), _L("Warning"),
                                  wxYES | wxCANCEL | wxICON_INFORMATION);
         dlg.show_dsa_button();
         auto          res = dlg.ShowModal();
@@ -793,7 +793,7 @@ void MediaPlayCtrl::ToggleStream()
                 url_alt += "&auxiliary_enable=1";
                 if (wxGetApp().app_config->get("not_show_agora_tips") != "1") {
                     MessageDialog msg_dlg(this->GetParent(),
-                                        _L("The live streaming feature relies on Bambu Studio to run,and the stream will end some time after the app is closed."),
+                                        _L("The live streaming feature relies on OpenStudio to run,and the stream will end some time after the app is closed."),
                                         _L("Information"), wxOK | wxICON_INFORMATION);
                     msg_dlg.show_dsa_button();
                     msg_dlg.ShowModal();

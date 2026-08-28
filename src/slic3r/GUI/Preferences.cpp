@@ -1460,12 +1460,12 @@ wxWindow *PreferencesDialog::create_general_tab()
     std::vector<std::string> FlushOptionValues = {"all", "color change", "disabled"};
     auto item_auto_flush = create_item_combobox(_L("Auto Flush"), scrolled, _L("Auto calculate flush volumes"), "auto_calculate_flush", FlushOptionLabels, FlushOptionValues);
 
-    auto item_single_instance = create_item_checkbox(_L("Keep only one Bambu Studio instance"), scrolled,
+    auto item_single_instance = create_item_checkbox(_L("Keep only one OpenStudio instance"), scrolled,
 #if __APPLE__
                                                      _L("On OSX there is always only one instance of app running by default. However it is allowed to run multiple instances "
                                                         "of same app from the command line. In such case this settings will allow only one instance."),
 #else
-                                                     _L("If this is enabled, when starting Bambu Studio and another instance of the same Bambu Studio is already running, that "
+                                                     _L("If this is enabled, when starting OpenStudio and another instance of the same OpenStudio is already running, that "
                                                         "instance will be reactivated instead."),
 #endif
                                                      50, "single_instance");
@@ -1554,10 +1554,10 @@ wxWindow *PreferencesDialog::create_user_tab()
                                                              "enable_high_low_temp_mixed_printing");
 
     auto item_user_sync = create_item_checkbox(_L("Auto sync user presets(Printer/Filament/Process)"), scrolled,
-                                               _L("If enabled, auto sync user presets with cloud after Bambu Studio startup or presets modified."), 50, "sync_user_preset");
+                                               _L("If enabled, auto sync user presets with cloud after OpenStudio startup or presets modified."), 50, "sync_user_preset");
 
     auto item_system_sync = create_item_checkbox(_L("Auto check for system presets updates"), scrolled,
-                                                 _L("If enabled, auto check whether there are system presets updates after Bambu Studio startup."), 50, "sync_system_preset");
+                                                 _L("If enabled, auto check whether there are system presets updates after OpenStudio startup."), 50, "sync_system_preset");
 
 #ifdef _WIN32
     auto item_webview_auto_fill = create_item_checkbox(_L("Auto-fill previously logged-in accounts."), scrolled, _L(""), 50, "webview_auto_fill");
@@ -1678,7 +1678,7 @@ wxWindow *PreferencesDialog::create_3d_tab()
     // [refactor-review] Not in Figma v2 3D tab; camera-fullscreen kept here (a 3D/
     // viewport-adjacent toggle). Reviewer: confirm placement.
     auto item_camera_fullscreen = create_item_checkbox(_L("Open full screen camera view on active monitor only."), scrolled,
-                                                       _L("When enabled, the camera full screen view opens only on the monitor that contains Bambu Studio."), 50,
+                                                       _L("When enabled, the camera full screen view opens only on the monitor that contains OpenStudio."), 50,
                                                        "camera_fullscreen_active_monitor_only");
     sizer->Add(wrap_option_row(scrolled, item_camera_fullscreen), flags); // [refactor-review]
 
@@ -1754,14 +1754,14 @@ wxWindow *PreferencesDialog::create_other_tab()
     sizer->Add(wrap_option_row(scrolled, item_webview_devtools), flags);
 
 #ifdef _WIN32
-    // ---- Associate Files To Bambu Studio (Windows only) ----
-    auto title_associate_file = create_item_title(_L("Associate Files To Bambu Studio"), scrolled, _L("Associate Files To Bambu Studio"));
-    auto item_associate_3mf   = create_item_checkbox(_L("Associate .3mf files to Bambu Studio"), scrolled,
-                                                     _L("If enabled, sets Bambu Studio as default application to open .3mf files"), 50, "associate_3mf");
-    auto item_associate_stl   = create_item_checkbox(_L("Associate .stl files to Bambu Studio"), scrolled,
-                                                     _L("If enabled, sets Bambu Studio as default application to open .stl files"), 50, "associate_stl");
-    auto item_associate_step  = create_item_checkbox(_L("Associate .step/.stp files to Bambu Studio"), scrolled,
-                                                     _L("If enabled, sets Bambu Studio as default application to open .step files"), 50, "associate_step");
+    // ---- Associate Files To OpenStudio (Windows only) ----
+    auto title_associate_file = create_item_title(_L("Associate Files To OpenStudio"), scrolled, _L("Associate Files To OpenStudio"));
+    auto item_associate_3mf   = create_item_checkbox(_L("Associate .3mf files to OpenStudio"), scrolled,
+                                                     _L("If enabled, sets OpenStudio as default application to open .3mf files"), 50, "associate_3mf");
+    auto item_associate_stl   = create_item_checkbox(_L("Associate .stl files to OpenStudio"), scrolled,
+                                                     _L("If enabled, sets OpenStudio as default application to open .stl files"), 50, "associate_stl");
+    auto item_associate_step  = create_item_checkbox(_L("Associate .step/.stp files to OpenStudio"), scrolled,
+                                                     _L("If enabled, sets OpenStudio as default application to open .step files"), 50, "associate_step");
     sizer->Add(title_associate_file, wxSizerFlags().Expand().Border(wxTOP, FromDIP(16)));
     sizer->Add(wrap_option_row(scrolled, item_associate_3mf), flags);
     sizer->Add(wrap_option_row(scrolled, item_associate_stl), flags);
