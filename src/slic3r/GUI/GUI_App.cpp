@@ -1051,7 +1051,7 @@ static void generic_exception_handle()
         // and terminate the app so it is at least certain to happen now.
         BOOST_LOG_TRIVIAL(error) << boost::format("std::bad_alloc exception: %1%") % ex.what();
         flush_logs();
-        wxString errmsg = wxString::Format(_L("BambuStudio will terminate because of running out of memory."
+        wxString errmsg = wxString::Format(_L("OpenStudio will terminate because of running out of memory."
                                               "It may be a bug. It will be appreciated if you report the issue to our team."));
         wxMessageBox(errmsg + "\n\n" + wxString(ex.what()), _L("Fatal error"), wxOK | wxICON_ERROR);
 
@@ -1060,7 +1060,7 @@ static void generic_exception_handle()
      } catch (const boost::io::bad_format_string& ex) {
         BOOST_LOG_TRIVIAL(error) << boost::format("Uncaught exception: %1%") % ex.what();
         flush_logs();
-        wxString errmsg = _L("BambuStudio will terminate because of a localization error. "
+        wxString errmsg = _L("OpenStudio will terminate because of a localization error. "
                              "It will be appreciated if you report the specific scenario this issue happened.");
         wxMessageBox(errmsg + "\n\n" + wxString(ex.what()), _L("Critical error"), wxOK | wxICON_ERROR);
         std::terminate();
@@ -1068,7 +1068,7 @@ static void generic_exception_handle()
     } catch (const std::exception& ex) {
         BOOST_LOG_TRIVIAL(error) << boost::format("Uncaught exception: %1%") % ex.what();
         flush_logs();
-        wxLogError(format_wxstr(_L("BambuStudio got an unhandled exception: %1%"), ex.what()));
+        wxLogError(format_wxstr(_L("OpenStudio got an unhandled exception: %1%"), ex.what()));
         throw;
     }
 //#endif
@@ -2634,7 +2634,7 @@ void GUI_App::init_app_config()
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__
             << "Configuration file may be corrupted and is not able to be parsed.Please delete the file and try again.";
             throw Slic3r::RuntimeError(
-                _u8L("BambuStudio configuration file read failed. Please manually backup and delete it, and then restart BambuStudio software.") +
+                _u8L("OpenStudio configuration file read failed. Please manually backup and delete it, and then restart OpenStudio software.") +
                 "\n\n" + app_config->config_path() + "\n\n" + error);
         }
         // Save orig_version here, so its empty if no app_config existed before this run.
@@ -3066,7 +3066,7 @@ bool GUI_App::on_init_inner()
 
     //set preset text
     auto preset_path = fs::path(Slic3r::data_dir()) / PRESET_SYSTEM_DIR;
-    m_install_preset_fail_text = wxString::Format(_L("Failed to install preset files to %s.\nPlease make sure Bambu Studio has permission to delete and write in this directory,\nand it is not being occupied by the system or other applications."), preset_path.string());
+    m_install_preset_fail_text = wxString::Format(_L("Failed to install preset files to %s.\nPlease make sure OpenStudio has permission to delete and write in this directory,\nand it is not being occupied by the system or other applications."), preset_path.string());
 
     // Set initialization of image handlers before any UI actions - See GH issue #7469
     wxInitAllImageHandlers();
@@ -3375,7 +3375,7 @@ bool GUI_App::on_init_inner()
                 wxString tips = wxString::Format(_L("Click to download new version in default browser: %s"), version_str);
                 DownloadDialog dialog(this->mainframe,
                     tips,
-                    _L("The Bambu Studio needs an upgrade"),
+                    _L("OpenStudio needs an upgrade"),
                     false,
                     wxCENTER | wxICON_INFORMATION);
                 dialog.SetExtendedMessage(description_text);
@@ -5329,7 +5329,7 @@ void GUI_App::on_http_error(wxCommandEvent &evt)
     // Version limit
     if (code == HttpErrorVersionLimited) {
         if (!m_show_error_msgdlg) {
-            MessageDialog msg_dlg(nullptr, _L("The Bambu Studio version is too old to enable cloud service. Please download the latest version from Bambu Lab website."), "", wxAPPLY | wxOK);
+            MessageDialog msg_dlg(nullptr, _L("The OpenStudio version is too old to enable cloud service. Please download the latest version from Bambu Lab website."), "", wxAPPLY | wxOK);
             m_show_error_msgdlg = true;
             auto modal_result = msg_dlg.ShowModal();
             m_show_error_msgdlg = false;
@@ -5338,7 +5338,7 @@ void GUI_App::on_http_error(wxCommandEvent &evt)
     }
     else if (status == 400 && code == HttpErrorCertRevoked) {
         if (!m_show_error_msgdlg) {
-            MessageDialog msg_dlg(nullptr, _L("Your software certificate has been revoked, please update Bambu Studio software."), "", wxAPPLY | wxOK);
+            MessageDialog msg_dlg(nullptr, _L("Your software certificate has been revoked, please update OpenStudio software."), "", wxAPPLY | wxOK);
             m_show_error_msgdlg = true;
             auto modal_result = msg_dlg.ShowModal();
             m_show_error_msgdlg = false;
@@ -5740,9 +5740,9 @@ void GUI_App::check_beta_version(bool show_tips_when_no_beta)
     platform = "linux";
 #endif
 
-    std::string repoOwner = "bambulab"; // The owner of repository
+    std::string repoOwner = "JaKuBisz"; // The owner of repository
     std::string repoName = "BambuStudio";   // The name of repository
-    //"https://api.github.com/repos/bambulab/BambuStudio/releases"
+    //"https://api.github.com/repos/JaKuBisz/BambuStudio/releases"
     std::string url = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases";
 
     Slic3r::Http http = Slic3r::Http::get(url);
@@ -5887,7 +5887,7 @@ bool GUI_App::process_network_msg(std::string dev_id, std::string msg)
         else if (msg == "update_studio") {
             BOOST_LOG_TRIVIAL(info) << "process_network_msg, update_studio";
             if (!m_show_error_msgdlg) {
-                MessageDialog msg_dlg(nullptr, _L("Please try updating Bambu Studio and then try again."), "", wxAPPLY | wxOK);
+                MessageDialog msg_dlg(nullptr, _L("Please try updating OpenStudio and then try again."), "", wxAPPLY | wxOK);
                 m_show_error_msgdlg = true;
                 auto modal_result = msg_dlg.ShowModal();
                 m_show_error_msgdlg = false;
@@ -5898,7 +5898,7 @@ bool GUI_App::process_network_msg(std::string dev_id, std::string msg)
         else if (msg == "update_fixed_studio") {
             BOOST_LOG_TRIVIAL(info) << "process_network_msg, update_fixed_studio";
             if (!m_show_error_msgdlg) {
-                MessageDialog msg_dlg(nullptr, _L("Please try updating Bambu Studio and then try again."), "", wxAPPLY | wxOK);
+                MessageDialog msg_dlg(nullptr, _L("Please try updating OpenStudio and then try again."), "", wxAPPLY | wxOK);
                 m_show_error_msgdlg = true;
                 auto modal_result = msg_dlg.ShowModal();
                 m_show_error_msgdlg = false;
@@ -5909,7 +5909,7 @@ bool GUI_App::process_network_msg(std::string dev_id, std::string msg)
         else if (msg == "cert_expired") {
             BOOST_LOG_TRIVIAL(info) << "process_network_msg, cert_expired";
             if (!m_show_error_msgdlg) {
-                MessageDialog msg_dlg(nullptr, _L("The certificate has expired. Please check the time settings or update Bambu Studio and try again."), "", wxAPPLY | wxOK);
+                MessageDialog msg_dlg(nullptr, _L("The certificate has expired. Please check the time settings or update OpenStudio and try again."), "", wxAPPLY | wxOK);
                 m_show_error_msgdlg = true;
                 auto modal_result = msg_dlg.ShowModal();
                 m_show_error_msgdlg = false;
@@ -6923,14 +6923,14 @@ bool GUI_App::load_language(wxString language, bool initial)
 
     if (! wxLocale::IsAvailable(language_info->Language)) {
     	// Loading the language dictionary failed.
-    	wxString message = "Switching Bambu Studio to language " + language_info->CanonicalName + " failed.";
+    	wxString message = "Switching OpenStudio to language " + language_info->CanonicalName + " failed.";
 #if !defined(_WIN32) && !defined(__APPLE__)
         // likely some linux system
         message += "\nYou may need to reconfigure the missing locales, likely by running the \"locale-gen\" and \"dpkg-reconfigure locales\" commands.\n";
 #endif
         if (initial)
         	message + "\n\nApplication will close.";
-        wxMessageBox(message, "Bambu Studio - Switching language failed", wxOK | wxICON_ERROR);
+        wxMessageBox(message, "OpenStudio - Switching language failed", wxOK | wxICON_ERROR);
         if (initial)
 			std::exit(EXIT_FAILURE);
         else {

@@ -2796,7 +2796,7 @@ static wxMenu* generate_help_menu()
         });
 
     append_menu_item(helpMenu, wxID_ANY, _L("Report issue"), _L("Report issue"), [](wxCommandEvent &) {
-        std::string url = "https://github.com/bambulab/BambuStudio/issues/new/choose";
+        std::string url = "https://github.com/JaKuBisz/BambuStudio/issues/new/choose";
         wxLaunchDefaultBrowser(url);
     });
 
@@ -3404,10 +3404,10 @@ void MainFrame::init_menubar_as_editor()
 
         std::string app_items[] = {
             L("Services"),
-            L("Hide BambuStudio"),
+            L("Hide OpenStudio"),
             L("Hide Others"),
             L("Show All"),
-            L("Quit BambuStudio")
+            L("Quit OpenStudio")
         };
 #else
     wxMenu* parent_menu = m_topbar->GetTopMenu();
