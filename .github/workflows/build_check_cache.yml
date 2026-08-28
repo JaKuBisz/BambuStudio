@@ -35,8 +35,12 @@ jobs:
         id: set_outputs
         env:
           dep-folder-name: ${{ inputs.os == 'windows-latest' && '/BambuStudio_dep' || ((inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && '') || (inputs.os != 'macos-15-intel' && inputs.os != 'macos-15' && inputs.os != 'macos-26') && '/destdir' || '' }}
+          # The two macOS universal jobs build identical deps (same arches,
+          # same 10.15 deployment target), so they share one cache entry —
+          # this halves macOS deps rebuilds when deps/** changes.
+          cache-os: ${{ ((inputs.os == 'macos-15' || inputs.os == 'macos-26') && 'macos-universal') || inputs.os }}
         run: |
-          echo cache-key=${{ inputs.os }}-cache-bambustudio_deps-build-${{ hashFiles('deps/**') }} >> "$GITHUB_OUTPUT"
+          echo cache-key=${{ env.cache-os }}-cache-bambustudio_deps-build-${{ hashFiles('deps/**') }} >> "$GITHUB_OUTPUT"
           # Relative path: resolved against the workspace of whichever runner
           # later restores the cache (this job itself runs on ubuntu-latest).
           echo cache-path=deps/build${{ env.dep-folder-name }} >> "$GITHUB_OUTPUT"

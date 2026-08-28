@@ -17,6 +17,7 @@ on:
   pull_request:
     branches:
      - master
+     - dev
     paths:
      - 'deps/**'
      - 'src/**'
@@ -93,17 +94,26 @@ jobs:
             entries=$(echo "$entries" | jq -c --arg os "$1" --arg arch "$2" '. + [({"os": $os} + (if $arch != "" then {"arch": $arch} else {} end))]')
           }
 
-          [ "$(include '${{ inputs.ubuntu-22-04 }}')" = "true" ] && add "ubuntu-22.04" ""
-          [ "$(include '${{ inputs.ubuntu-24-04 }}')" = "true" ] && add "ubuntu-24.04" ""
-          [ "$(include '${{ inputs.ubuntu-26-04 }}')" = "true" ] && add "ubuntu-26.04" ""
-          [ "$(include '${{ inputs.windows }}')" = "true" ] && add "windows-latest" ""
-          # Intel-only build is redundant with the universal builds (which
-          # already include x86_64 with the same 10.15 deployment target), so
-          # it never runs on push/PR — only when explicitly enabled via
-          # workflow dispatch.
-          [ "$is_dispatch" = "true" ] && [ "${{ inputs.macos-intel }}" = "true" ] && add "macos-15-intel" "x86_64"
-          [ "$(include '${{ inputs.macos-15-universal }}')" = "true" ] && add "macos-15" "universal"
-          [ "$(include '${{ inputs.macos-26-universal }}')" = "true" ] && add "macos-26" "universal"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Slim matrix for PRs: one fast representative per platform
+            # family. The full matrix still runs on push to master/dev and
+            # can be customized via workflow dispatch.
+            add "ubuntu-24.04" ""
+            add "windows-latest" ""
+            add "macos-26" "universal"
+          else
+            [ "$(include '${{ inputs.ubuntu-22-04 }}')" = "true" ] && add "ubuntu-22.04" ""
+            [ "$(include '${{ inputs.ubuntu-24-04 }}')" = "true" ] && add "ubuntu-24.04" ""
+            [ "$(include '${{ inputs.ubuntu-26-04 }}')" = "true" ] && add "ubuntu-26.04" ""
+            [ "$(include '${{ inputs.windows }}')" = "true" ] && add "windows-latest" ""
+            # Intel-only build is redundant with the universal builds (which
+            # already include x86_64 with the same 10.15 deployment target), so
+            # it never runs on push/PR — only when explicitly enabled via
+            # workflow dispatch.
+            [ "$is_dispatch" = "true" ] && [ "${{ inputs.macos-intel }}" = "true" ] && add "macos-15-intel" "x86_64"
+            [ "$(include '${{ inputs.macos-15-universal }}')" = "true" ] && add "macos-15" "universal"
+            [ "$(include '${{ inputs.macos-26-universal }}')" = "true" ] && add "macos-26" "universal"
+          fi
 
           echo "matrix={\"include\":$entries}" >> "$GITHUB_OUTPUT"
           echo "Selected matrix: $entries"

@@ -26,8 +26,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          lfs: 'true'
+        # No LFS objects in this repo (no .gitattributes) — skip git-lfs setup.
 
       - name: load cached deps
         uses: actions/cache@v5
@@ -120,12 +119,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           brew install automake texinfo
-          brew unlink cmake || true
-          brew tap-new $USER/old-cmake
-          brew extract --version=3.31.0 cmake $USER/old-cmake
-          brew install $USER/old-cmake/cmake@3.31.0
-          brew link --overwrite cmake@3.31.0
-          brew pin cmake@3.31.0
+          # CMake 4.x breaks legacy subprojects, so pin 3.31.0 — via the
+          # official prebuilt binary (seconds), not brew extract which
+          # compiles cmake from source (~8 min per job).
+          curl -sSL https://github.com/Kitware/CMake/releases/download/v3.31.0/cmake-3.31.0-macos-universal.tar.gz | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/cmake-3.31.0-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
           ./BuildMac.sh -s -x -a x86_64 -t 10.15
           "$RUNNER_TEMP/sccache-bin/sccache" --show-stats || true
 
@@ -134,12 +132,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           brew install automake texinfo
-          brew unlink cmake || true
-          brew tap-new $USER/old-cmake
-          brew extract --version=3.31.0 cmake $USER/old-cmake
-          brew install $USER/old-cmake/cmake@3.31.0
-          brew link --overwrite cmake@3.31.0
-          brew pin cmake@3.31.0
+          # CMake 4.x breaks legacy subprojects, so pin 3.31.0 — via the
+          # official prebuilt binary (seconds), not brew extract which
+          # compiles cmake from source (~8 min per job).
+          curl -sSL https://github.com/Kitware/CMake/releases/download/v3.31.0/cmake-3.31.0-macos-universal.tar.gz | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/cmake-3.31.0-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
           ./BuildMac.sh -s -x -a universal -t 10.15
           "$RUNNER_TEMP/sccache-bin/sccache" --show-stats || true
 
@@ -178,18 +175,35 @@ jobs:
         with:
           name: OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}
           path: ${{ github.workspace }}/OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}.dmg
+          retention-days: 14
 
   # Windows
-      - name: setup MSVC
+      - name: Cache compiler cache (Windows)
         if: inputs.os == 'windows-latest'
-        uses: microsoft/setup-msbuild@v2
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: windows-latest-sccache-${{ github.sha }}
+          restore-keys: |
+            windows-latest-sccache-
 
-      - name: Install nsis and pkgconfig
+      # Ninja generator + sccache: the Visual Studio generator ignores
+      # CMAKE_*_COMPILER_LAUNCHER, so it can never use a compiler cache.
+      - name: setup MSVC toolchain
         if: inputs.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install nsis, pkgconfig and sccache
+        if: inputs.os == 'windows-latest'
+        shell: pwsh
         run: |
-          dir "C:/Program Files (x86)/Windows Kits/10/Include"
           choco install nsis
           choco install pkgconfiglite
+          choco install -y sccache
+          echo "SCCACHE_DIR=$env:GITHUB_WORKSPACE\.sccache" >> $env:GITHUB_ENV
+          echo "SCCACHE_CACHE_SIZE=2G" >> $env:GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $env:GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $env:GITHUB_ENV
 
       - name: Build slicer Win
         if: inputs.os == 'windows-latest'
@@ -197,8 +211,9 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -G "Visual Studio 18 2026" -A X64 -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
-          cmake --build . --target install --config Release -- -m
+          cmake .. -G Ninja -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
+          cmake --build . --target install
+          sccache --show-stats
 
       # - name: Create installer Win
       #   if: inputs.os == 'windows-latest'
@@ -224,6 +239,7 @@ jobs:
         with:
           name: OpenStudio_Windows_${{ env.ver }}_portable
           path: ${{ github.workspace }}/OpenStudio_Windows_${{ env.ver }}_portable.zip
+          retention-days: 14
 
 
   # Ubuntu
@@ -260,6 +276,7 @@ jobs:
         with:
           name: OpenStudio_${{inputs.os}}_${{ env.ver }}
           path: './build/OpenStudio_${{inputs.os}}_${{ env.ver }}.AppImage'
+          retention-days: 14
 
       # - name: Deploy Ubuntu release
       #   if: ${{ ! env.ACT && github.ref == 'refs/heads/main' && inputs.os == 'ubuntu-22.04' }}
