@@ -46,7 +46,10 @@ else ()
         endif()
     endif()
 
-    set(_build_j -j)
+    # Default to NPROC (never a bare -j, which spawns unbounded jobs and can
+    # exhaust process/memory limits, e.g. "posix_spawn failed: Resource
+    # temporarily unavailable" on macOS runners).
+    set(_build_j -j${NPROC})
     if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
         set(_build_j "-j$ENV{CMAKE_BUILD_PARALLEL_LEVEL}")
     endif()

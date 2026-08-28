@@ -79,6 +79,19 @@ if [ -z "$OSX_DEPLOYMENT_TARGET" ]; then
   export OSX_DEPLOYMENT_TARGET="10.15"
 fi
 
+if [ -z "$CMAKE_BUILD_PARALLEL_LEVEL" ]; then
+    # Universal builds compile both architectures concurrently, so split the
+    # core budget between them. An unset level would also let some deps
+    # (e.g. ffmpeg's `make -j`) spawn unbounded jobs and exhaust process
+    # limits on small runners.
+    NCPU=$(sysctl -n hw.ncpu 2>/dev/null || echo 2)
+    if [ "$ARCH" == "universal" ]; then
+        export CMAKE_BUILD_PARALLEL_LEVEL=$(( NCPU / 2 > 1 ? NCPU / 2 : 1 ))
+    else
+        export CMAKE_BUILD_PARALLEL_LEVEL=$NCPU
+    fi
+fi
+
 echo "Build params:"
 echo " - ARCH: $ARCH"
 echo " - BUILD_CONFIG: $BUILD_CONFIG"
