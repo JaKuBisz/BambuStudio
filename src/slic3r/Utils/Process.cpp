@@ -39,7 +39,7 @@ static void start_new_slicer_or_gcodeviewer(const NewSlicerInstanceType instance
 	wxString path;
 	wxFileName::SplitPath(wxStandardPaths::Get().GetExecutablePath(), &path, nullptr, nullptr, wxPATH_NATIVE);
 	path += "\\";
-	path += (instance_type == NewSlicerInstanceType::Slicer) ? "bambu-studio.exe" : "bambu-gcodeviewer.exe";
+	path += (instance_type == NewSlicerInstanceType::Slicer) ? "openstudio.exe" : "bambu-gcodeviewer.exe";
 	std::vector<const wchar_t*> args;
 	args.reserve(4);
 	args.emplace_back(path.wc_str());
@@ -60,7 +60,7 @@ static void start_new_slicer_or_gcodeviewer(const NewSlicerInstanceType instance
 	boost::filesystem::path bin_path = into_path(wxStandardPaths::Get().GetExecutablePath());
 #if defined(__APPLE__)
 	{
-		bin_path = bin_path.parent_path() / "BambuStudio";
+		bin_path = bin_path.parent_path() / "OpenStudio";
         //bin_path = "/usr/bin/open";
 		// On Apple the wxExecute fails, thus we use boost::process instead.
 		BOOST_LOG_TRIVIAL(info) << "Trying to spawn a new slicer \"" << bin_path.string() << "\"";
