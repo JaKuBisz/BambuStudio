@@ -16,7 +16,11 @@ on:
 jobs:
   check_cache: # determines if there is a cache and outputs variables used in caching process
     name: Check Cache
-    runs-on: ${{ inputs.os }}
+    # Run on ubuntu-latest regardless of target OS: hashFiles('deps/**') is
+    # content-based and this repo has no .gitattributes, so the hash is
+    # identical on every platform. This keeps the (scarce, slow-to-start)
+    # macOS runner slots free for real builds.
+    runs-on: ubuntu-latest
     outputs:
       cache-key: ${{ steps.set_outputs.outputs.cache-key }}
       cache-path: ${{ steps.set_outputs.outputs.cache-path }}
@@ -25,16 +29,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          lfs: 'true'
+          lfs: 'false' # only hashing deps/** here, no need to download LFS objects
         
       - name: set outputs
         id: set_outputs
         env:
           dep-folder-name: ${{ inputs.os == 'windows-latest' && '/BambuStudio_dep' || ((inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && '') || (inputs.os != 'macos-15-intel' && inputs.os != 'macos-15' && inputs.os != 'macos-26') && '/destdir' || '' }}
-          output-cmd: ${{ inputs.os == 'windows-latest' && '$env:GITHUB_OUTPUT' || '"$GITHUB_OUTPUT"'}}
         run: |
-          echo cache-key=${{ inputs.os }}-cache-bambustudio_deps-build-${{ hashFiles('deps/**') }} >> ${{ env.output-cmd }}
-          echo cache-path=${{ github.workspace }}/deps/build${{ env.dep-folder-name }} >> ${{ env.output-cmd }}
+          echo cache-key=${{ inputs.os }}-cache-bambustudio_deps-build-${{ hashFiles('deps/**') }} >> "$GITHUB_OUTPUT"
+          # Relative path: resolved against the workspace of whichever runner
+          # later restores the cache (this job itself runs on ubuntu-latest).
+          echo cache-path=deps/build${{ env.dep-folder-name }} >> "$GITHUB_OUTPUT"
             
       - name: load cache
         id: cache_deps

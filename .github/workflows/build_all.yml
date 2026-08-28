@@ -49,9 +49,9 @@ on:
             type: boolean
             default: true
         macos-intel:
-            description: 'macOS 15 (Intel only, x86_64)'
+            description: 'macOS 15 (Intel only, x86_64) - disabled by default; the universal builds already cover x86_64'
             type: boolean
-            default: true
+            default: false
         macos-15-universal:
             description: 'macOS 15 (Universal: arm64 + x86_64)'
             type: boolean
@@ -97,7 +97,11 @@ jobs:
           [ "$(include '${{ inputs.ubuntu-24-04 }}')" = "true" ] && add "ubuntu-24.04" ""
           [ "$(include '${{ inputs.ubuntu-26-04 }}')" = "true" ] && add "ubuntu-26.04" ""
           [ "$(include '${{ inputs.windows }}')" = "true" ] && add "windows-latest" ""
-          [ "$(include '${{ inputs.macos-intel }}')" = "true" ] && add "macos-15-intel" "x86_64"
+          # Intel-only build is redundant with the universal builds (which
+          # already include x86_64 with the same 10.15 deployment target), so
+          # it never runs on push/PR — only when explicitly enabled via
+          # workflow dispatch.
+          [ "$is_dispatch" = "true" ] && [ "${{ inputs.macos-intel }}" = "true" ] && add "macos-15-intel" "x86_64"
           [ "$(include '${{ inputs.macos-15-universal }}')" = "true" ] && add "macos-15" "universal"
           [ "$(include '${{ inputs.macos-26-universal }}')" = "true" ] && add "macos-26" "universal"
 
