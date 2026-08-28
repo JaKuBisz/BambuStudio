@@ -268,7 +268,12 @@ else ()
         set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/../resources")
     endif ()
     if (CMAKE_MACOSX_BUNDLE)
-        set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/${BIN_CONF_DIR}/BambuStudio.app/Contents/Resources")
+        # Rename the app bundle itself (BambuStudio.app -> OpenStudio.app), not
+        # just the Info.plist CFBundleName. Without OUTPUT_NAME, CMake names the
+        # bundle folder after the CMake target ("BambuStudio"), regardless of
+        # MACOSX_BUNDLE_BUNDLE_NAME below.
+        set_target_properties(BambuStudio PROPERTIES OUTPUT_NAME "OpenStudio")
+        set(BIN_RESOURCES_DIR "${CMAKE_CURRENT_BINARY_DIR}/${BIN_CONF_DIR}/OpenStudio.app/Contents/Resources")
         set(MACOSX_BUNDLE_ICON_FILE Icon.icns)
         set(MACOSX_BUNDLE_BUNDLE_NAME "OpenStudio")
         set(MACOSX_BUNDLE_SHORT_VERSION_STRING ${SLIC3R_VERSION})
