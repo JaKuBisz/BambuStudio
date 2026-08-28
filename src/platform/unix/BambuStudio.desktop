@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=OpenStudio
 GenericName=3D Printing Software
-Icon=BambuStudio
+Icon=OpenStudio
 Exec=bambu-studio %U
 Terminal=false
 Type=Application

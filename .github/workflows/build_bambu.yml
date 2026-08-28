@@ -119,12 +119,12 @@ jobs:
           # Ad-hoc signing at least prevents "app is damaged" failures and
           # lets users get past the warning via right-click > Open (or
           # System Settings > Privacy & Security > Open Anyway, or
-          # `xattr -cr BambuStudio.app` after downloading).
-          codesign --force --deep --sign - "$APP_DIR/BambuStudio.app"
+          # `xattr -cr OpenStudio.app` after downloading).
+          codesign --force --deep --sign - "$APP_DIR/OpenStudio.app"
 
           DMG_NAME="OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}.dmg"
           STAGE_DIR=$(mktemp -d)
-          cp -R "$APP_DIR/BambuStudio.app" "$STAGE_DIR/"
+          cp -R "$APP_DIR/OpenStudio.app" "$STAGE_DIR/"
           ln -s /Applications "$STAGE_DIR/Applications"
           hdiutil create -volname "OpenStudio" -srcfolder "$STAGE_DIR" -ov -format UDZO "$DMG_NAME"
           rm -rf "$STAGE_DIR"
