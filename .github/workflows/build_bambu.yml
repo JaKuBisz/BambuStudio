@@ -15,9 +15,33 @@ on:
         type: string
 
 jobs:
+  prepare:
+    name: Prepare build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      barch-matrix: ${{ steps.set.outputs.barch-matrix }}
+    steps:
+      - id: set
+        run: |
+          # Universal macOS builds are split across two runners (one runner
+          # per arch, each with its full vCPU set) and combined afterwards in
+          # the package_universal job. Everything else builds in one job.
+          if [ "${{ inputs.arch }}" == "universal" ]; then
+            echo 'barch-matrix=["x86_64","arm64"]' >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.arch }}" ]; then
+            echo 'barch-matrix=["${{ inputs.arch }}"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'barch-matrix=["native"]' >> "$GITHUB_OUTPUT"
+          fi
+
   build_bambu:
     name: Build OpenStudio
+    needs: prepare
     runs-on: ${{ inputs.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        barch: ${{ fromJSON(needs.prepare.outputs.barch-matrix) }}
     env:
       date:
       ver:
@@ -79,9 +103,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.sccache
-          key: ${{ inputs.os }}-sccache-${{ github.sha }}
+          key: ${{ inputs.os }}-sccache-${{ matrix.barch }}-${{ github.sha }}
           restore-keys: |
-            ${{ inputs.os }}-sccache-
+            ${{ inputs.os }}-sccache-${{ matrix.barch }}-
 
       - name: Install sccache (macOS)
         if: inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26'
@@ -127,7 +151,7 @@ jobs:
           ./BuildMac.sh -s -x -a x86_64 -t 10.15
           "$RUNNER_TEMP/sccache-bin/sccache" --show-stats || true
 
-      - name: Build slicer mac
+      - name: Build slicer mac (${{ matrix.barch }})
         if: inputs.os == 'macos-15' || inputs.os == 'macos-26'
         working-directory: ${{ github.workspace }}
         run: |
@@ -137,21 +161,18 @@ jobs:
           # compiles cmake from source (~8 min per job).
           curl -sSL https://github.com/Kitware/CMake/releases/download/v3.31.0/cmake-3.31.0-macos-universal.tar.gz | tar xz -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/cmake-3.31.0-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
-          ./BuildMac.sh -s -x -a universal -t 10.15
+          ./BuildMac.sh -s -x -a ${{ matrix.barch }} -t 10.15
           "$RUNNER_TEMP/sccache-bin/sccache" --show-stats || true
 
+      # Universal builds are packaged in the package_universal job instead.
       - name: pack mac dmg
-        if: github.ref != 'refs/heads/main' && (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26')
+        if: github.ref != 'refs/heads/main' && inputs.os == 'macos-15-intel'
         working-directory: ${{ github.workspace }}
         run: |
           # Only package the final .app bundle, not the whole raw CMake build
           # tree (object files, static libs, intermediate per-arch builds),
           # which previously bloated this artifact to ~2GB.
-          if [ "${{ inputs.os }}" == "macos-15-intel" ]; then
-            APP_DIR="build/x86_64/BambuStudio"
-          else
-            APP_DIR="build/universal/BambuStudio"
-          fi
+          APP_DIR="build/x86_64/BambuStudio"
 
           # Ad-hoc self-sign the app. This fork has no paid Apple Developer ID
           # certificate to notarize with, so Gatekeeper will still warn "Apple
@@ -170,12 +191,26 @@ jobs:
           rm -rf "$STAGE_DIR"
 
       - name: Upload artifacts mac
-        if: inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26'
+        if: inputs.os == 'macos-15-intel'
         uses: actions/upload-artifact@v6
         with:
           name: OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}
           path: ${{ github.workspace }}/OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}.dmg
           retention-days: 14
+
+      # Universal builds: hand the per-arch .app bundle to package_universal.
+      - name: Upload ${{ matrix.barch }} app bundle
+        if: (inputs.os == 'macos-15' || inputs.os == 'macos-26') && inputs.arch == 'universal'
+        working-directory: ${{ github.workspace }}
+        run: tar -C "build/${{ matrix.barch }}/BambuStudio" -czf "app_${{ matrix.barch }}.tar.gz" OpenStudio.app
+
+      - name: Upload app bundle artifact
+        if: (inputs.os == 'macos-15' || inputs.os == 'macos-26') && inputs.arch == 'universal'
+        uses: actions/upload-artifact@v6
+        with:
+          name: app-bundle-${{ matrix.barch }}
+          path: ${{ github.workspace }}/app_${{ matrix.barch }}.tar.gz
+          retention-days: 1
 
   # Windows
       - name: Cache compiler cache (Windows)
@@ -211,8 +246,14 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -G Ninja -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
+          # /FS is required with Ninja: multiple parallel cl.exe processes
+          # write the same shared .pdb (fatal error C1041 otherwise).
+          cmake .. -G Ninja -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0" -DCMAKE_C_FLAGS=/FS -DCMAKE_CXX_FLAGS=/FS
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build . --target install
+          # pwsh does NOT abort on native command failure — check explicitly,
+          # otherwise a failed build is masked by the stats command below.
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           sccache --show-stats
 
       # - name: Create installer Win
@@ -299,3 +340,78 @@ jobs:
       #     asset_name: orca_custom_preset_tests.zip
       #     asset_content_type: application/octet-stream
       #     max_releases: 1
+
+  # Universal macOS builds: the two arch slices were built on separate
+  # runners (build_bambu matrix); this job combines them via lipo and
+  # packages the dmg.
+  package_universal:
+    name: Package universal macOS
+    needs: [build_bambu]
+    if: inputs.arch == 'universal'
+    runs-on: ${{ inputs.os }}
+    env:
+      ver:
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Get the version
+        run: |
+          ver_pure=$(grep 'set(SLIC3R_VERSION' version.inc | cut -d '"' -f2)
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            ver="PR-${{ github.event.number }}"
+          else
+            ver=V$ver_pure
+          fi
+          echo "ver=$ver" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Download app bundles
+        uses: actions/download-artifact@v6
+        with:
+          pattern: app-bundle-*
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Combine universal binary
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -e
+          for A in x86_64 arm64; do
+            mkdir -p "build/$A/BambuStudio"
+            tar -C "build/$A/BambuStudio" -xzf "artifacts/app-bundle-$A/app_$A.tar.gz"
+          done
+          mkdir -p build/universal/BambuStudio
+          rm -rf build/universal/BambuStudio/OpenStudio.app
+          cp -R build/arm64/BambuStudio/OpenStudio.app build/universal/BambuStudio/OpenStudio.app
+          lipo -create \
+            build/x86_64/BambuStudio/OpenStudio.app/Contents/MacOS/OpenStudio \
+            build/arm64/BambuStudio/OpenStudio.app/Contents/MacOS/OpenStudio \
+            -output build/universal/BambuStudio/OpenStudio.app/Contents/MacOS/OpenStudio
+
+      - name: pack mac dmg
+        working-directory: ${{ github.workspace }}
+        run: |
+          APP_DIR="build/universal/BambuStudio"
+
+          # Ad-hoc self-sign the app. This fork has no paid Apple Developer ID
+          # certificate to notarize with, so Gatekeeper will still warn "Apple
+          # could not verify this app is free of malware" on first launch.
+          # Ad-hoc signing at least prevents "app is damaged" failures and
+          # lets users get past the warning via right-click > Open (or
+          # System Settings > Privacy & Security > Open Anyway, or
+          # `xattr -cr OpenStudio.app` after downloading).
+          codesign --force --deep --sign - "$APP_DIR/OpenStudio.app"
+
+          DMG_NAME="OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}.dmg"
+          STAGE_DIR=$(mktemp -d)
+          cp -R "$APP_DIR/OpenStudio.app" "$STAGE_DIR/"
+          ln -s /Applications "$STAGE_DIR/Applications"
+          hdiutil create -volname "OpenStudio" -srcfolder "$STAGE_DIR" -ov -format UDZO "$DMG_NAME"
+          rm -rf "$STAGE_DIR"
+
+      - name: Upload artifacts mac
+        uses: actions/upload-artifact@v6
+        with:
+          name: OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}
+          path: ${{ github.workspace }}/OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}.dmg
+          retention-days: 14

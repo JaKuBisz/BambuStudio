@@ -86,7 +86,9 @@ if [ -z "$CMAKE_BUILD_PARALLEL_LEVEL" ]; then
     # limits on small runners.
     NCPU=$(sysctl -n hw.ncpu 2>/dev/null || echo 2)
     if [ "$ARCH" == "universal" ]; then
-        export CMAKE_BUILD_PARALLEL_LEVEL=$(( NCPU / 2 > 1 ? NCPU / 2 : 1 ))
+        # Round up: mild oversubscription (e.g. 2+2 jobs on 3 vCPUs) beats an
+        # idle core — the scheduler time-slices compile processes fine.
+        export CMAKE_BUILD_PARALLEL_LEVEL=$(( (NCPU + 1) / 2 > 1 ? (NCPU + 1) / 2 : 1 ))
     else
         export CMAKE_BUILD_PARALLEL_LEVEL=$NCPU
     fi
