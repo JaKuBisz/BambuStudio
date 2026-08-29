@@ -134,6 +134,10 @@ jobs:
           if ! command -v ccache >/dev/null; then sudo apt-get update && sudo apt-get install -y ccache; fi
           echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
+          # Allow caching of compilations that use precompiled headers (the
+          # PCH content is hashed; it is byte-stable now that the volatile
+          # build timestamp lives outside the PCH include chain).
+          echo "CCACHE_SLOPPINESS=pch_defines,time_macros" >> "$GITHUB_ENV"
           echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
 
@@ -254,7 +258,10 @@ jobs:
           # SLIC3R_MSVC_PDB=0: CI ships no PDBs, and embedded debug info
           # (/Z7) would push libslic3r_gui.lib past the 4 GiB static-library
           # limit (LNK1248).
-          cmake .. -G Ninja -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DSLIC3R_MSVC_PDB=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
+          # SLIC3R_PCH=OFF: sccache cannot cache MSVC /Yu (PCH) compilations at
+          # all, and PCH'd targets are the bulk of the build. Disabling PCH
+          # makes cold builds slightly slower but warm builds fully cached.
+          cmake .. -G Ninja -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DSLIC3R_MSVC_PDB=0 -DSLIC3R_PCH=OFF -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build . --target install
           # pwsh does NOT abort on native command failure — check explicitly,
