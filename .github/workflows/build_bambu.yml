@@ -301,6 +301,12 @@ jobs:
         if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04'
         shell: bash
         run: |
+          # ubuntu-22.04 (GCC 11) produces non-reproducible .gch files, so the
+          # PCH changes bytes every build and every PCH-consuming TU misses the
+          # compiler cache. Disable PCH there so the build is fully cacheable.
+          if [ "${{ inputs.os }}" == "ubuntu-22.04" ]; then
+            export SLIC3R_EXTRA_CMAKE_ARGS="-DSLIC3R_PCH=OFF"
+          fi
           ./BuildLinux.sh -isfr
           ccache --show-stats || true
           mv -n ./build/OpenStudio_ubu64.AppImage ./build/OpenStudio_${{inputs.os}}_${{ env.ver }}.AppImage

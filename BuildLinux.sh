@@ -197,7 +197,7 @@ then
     cmake -S . -B build -G Ninja \
         -DCMAKE_PREFIX_PATH="${PWD}/deps/build/destdir/usr/local" \
         -DSLIC3R_STATIC=1 \
-        ${BUILD_ARGS}
+        ${BUILD_ARGS} ${SLIC3R_EXTRA_CMAKE_ARGS:-}
     echo "done"
     echo "Building BambuStudio ..."
     cmake --build build --target BambuStudio
