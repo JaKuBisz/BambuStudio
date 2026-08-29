@@ -246,9 +246,11 @@ jobs:
         run: |
           mkdir build
           cd build
-          # /FS is required with Ninja: multiple parallel cl.exe processes
-          # write the same shared .pdb (fatal error C1041 otherwise).
-          cmake .. -G Ninja -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0" -DCMAKE_C_FLAGS=/FS -DCMAKE_CXX_FLAGS=/FS
+          # Do NOT pass -DCMAKE_C/CXX_FLAGS here: it would clobber CMake's
+          # default MSVC flags (/EHsc /GR /W3), and without /EHsc the STL
+          # raises C4530, which /WX targets promote to errors (C2220).
+          # The shared-PDB issue (C1041) is solved by /Z7 in CMakeLists.txt.
+          cmake .. -G Ninja -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build . --target install
           # pwsh does NOT abort on native command failure — check explicitly,
