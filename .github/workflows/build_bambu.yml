@@ -266,7 +266,12 @@ jobs:
         if: inputs.os == 'windows-latest'
         working-directory: ${{ github.workspace }}
         shell: cmd
-        run: '"C:/Program Files/7-Zip/7z.exe" a -tzip OpenStudio_Windows_${{ env.ver }}_portable.zip ${{ github.workspace }}/install-dir'
+        run: |
+          rem Give the zip a proper top-level folder (OpenStudio\) instead of
+          rem install-dir\ — the portable-app convention, avoids scattering
+          rem files when users extract into an existing directory.
+          move install-dir OpenStudio
+          "C:/Program Files/7-Zip/7z.exe" a -tzip OpenStudio_Windows_${{ env.ver }}_portable.zip OpenStudio
 
       # - name: Pack PDB
       #   if: inputs.os == 'windows-latest'
