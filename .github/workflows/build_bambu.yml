@@ -218,32 +218,20 @@ jobs:
           retention-days: 1
 
   # Windows
-      - name: Cache compiler cache (Windows)
+      # NOTE: back to the Visual Studio generator. Ninja+sccache was a dead
+      # end: sccache cannot cache MSVC /Yu (PCH) compilations — and the PCH'd
+      # targets are the bulk of the build — while disabling PCH breaks sources
+      # that rely on PCH-transitive definitions (NOMINMAX etc.). msbuild
+      # parallelizes fine (/m) and handles shared PDBs via /FS natively.
+      - name: setup MSVC
         if: inputs.os == 'windows-latest'
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.sccache
-          key: windows-latest-sccache-${{ github.sha }}
-          restore-keys: |
-            windows-latest-sccache-
+        uses: microsoft/setup-msbuild@v2
 
-      # Ninja generator + sccache: the Visual Studio generator ignores
-      # CMAKE_*_COMPILER_LAUNCHER, so it can never use a compiler cache.
-      - name: setup MSVC toolchain
+      - name: Install nsis and pkgconfig
         if: inputs.os == 'windows-latest'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Install nsis, pkgconfig and sccache
-        if: inputs.os == 'windows-latest'
-        shell: pwsh
         run: |
           choco install nsis
           choco install pkgconfiglite
-          choco install -y sccache
-          echo "SCCACHE_DIR=$env:GITHUB_WORKSPACE\.sccache" >> $env:GITHUB_ENV
-          echo "SCCACHE_CACHE_SIZE=2G" >> $env:GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $env:GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $env:GITHUB_ENV
 
       - name: Build slicer Win
         if: inputs.os == 'windows-latest'
@@ -254,20 +242,14 @@ jobs:
           # Do NOT pass -DCMAKE_C/CXX_FLAGS here: it would clobber CMake's
           # default MSVC flags (/EHsc /GR /W3), and without /EHsc the STL
           # raises C4530, which /WX targets promote to errors (C2220).
-          # The shared-PDB issue (C1041) is solved by /Z7 in CMakeLists.txt.
           # SLIC3R_MSVC_PDB=0: CI ships no PDBs, and embedded debug info
-          # (/Z7) would push libslic3r_gui.lib past the 4 GiB static-library
+          # would push libslic3r_gui.lib past the 4 GiB static-library
           # limit (LNK1248).
-          # SLIC3R_PCH=OFF: sccache cannot cache MSVC /Yu (PCH) compilations at
-          # all, and PCH'd targets are the bulk of the build. Disabling PCH
-          # makes cold builds slightly slower but warm builds fully cached.
-          cmake .. -G Ninja -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DSLIC3R_MSVC_PDB=0 -DSLIC3R_PCH=OFF -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
+          cmake .. -G "Visual Studio 18 2026" -A X64 -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DSLIC3R_MSVC_PDB=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build . --target install
-          # pwsh does NOT abort on native command failure — check explicitly,
-          # otherwise a failed build is masked by the stats command below.
+          cmake --build . --target install --config Release -- -m
+          # pwsh does NOT abort on native command failure — check explicitly.
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          sccache --show-stats
 
       # - name: Create installer Win
       #   if: inputs.os == 'windows-latest'
