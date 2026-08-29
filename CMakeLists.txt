@@ -126,17 +126,19 @@ else ()
 endif ()
 
 if (MSVC)
+    # /MP only matters for the Visual Studio generator (local dev builds);
+    # under Ninja each cl.exe gets a single TU, so it is a harmless no-op in CI.
     if (SLIC3R_MSVC_COMPILE_PARALLEL AND NOT IS_CLANG_CL)
            add_compile_options(/MP)
     endif ()
     # /bigobj (Increase Number of Sections in .Obj file)
     # error C3859: virtual memory range for PCH exceeded; please recompile with a command line option of '-Zm90' or greater
-    # Generate symbols at every build target, even for the release.
-    # /Z7 (not /Zi): embeds debug info into each .obj instead of a shared
-    # per-target .pdb at compile time. /Zi breaks parallel Ninja builds
-    # (fatal C1041 on the shared .pdb; /FS is not honored through sccache)
-    # and cannot be compiler-cached. The linker still emits the final PDB.
     add_compile_options(-bigobj -Zm520)
+    # NOMINMAX: with PCH off (SLIC3R_PCH=OFF, needed for sccache coverage),
+    # each TU includes windows.h on its own and the min/max macros collide
+    # with std::numeric_limits<T>::max() etc. (C2589 in Emboss.cpp). The PCH
+    # chain previously masked this.
+    add_compile_options(/DNOMINMAX)
     if (SLIC3R_MSVC_PDB)
         # Generate symbols at every build target, even for the release.
         # /Z7 (not /Zi): embeds debug info into each .obj instead of a shared

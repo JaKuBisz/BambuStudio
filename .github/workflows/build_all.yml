@@ -62,10 +62,10 @@ on:
             type: boolean
             default: true
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
+# No workflow-level concurrency: job-level groups inside the reusable
+# workflows handle it. App jobs cancel freely (cheap with warm caches); deps
+# jobs share a non-cancelling per-OS group with deps.yml so expensive
+# superbuild work is never killed mid-flight (a cancelled job saves no cache).
 jobs:
   prepare_matrix:
     name: Prepare Matrix
@@ -125,7 +125,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare_matrix.outputs.matrix) }}
-    uses: ./.github/workflows/build_check_cache.yml
+    # Calls build_deps directly — no separate cache-probe workflow. The deps
+    # job restores the cache in-job and fast-exits on a hit; on a miss it
+    # builds (fallback for when deps.yml hasn't populated the cache yet).
+    uses: ./.github/workflows/build_deps.yml
     with:
       os: ${{ matrix.os }}
       arch: ${{ matrix.arch }}

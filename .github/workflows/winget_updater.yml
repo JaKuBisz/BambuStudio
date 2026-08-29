@@ -1,14 +1,37 @@
 name: Publish to WinGet
+
+# Gated to manual dispatch. As of the OpenStudio rebrand this workflow cannot
+# succeed automatically:
+#  - The pipeline builds a portable .zip only; the NSIS installer step is
+#    commented out, so no .exe asset exists for installers-regex to match.
+#  - The package identifier below is upstream's (Bambulab.BambuStudio), not
+#    this fork's.
+#  - The WINGET_TOKEN secret is not configured on this repository.
+# Re-enable the `release: [released]` trigger after adding the secret and
+# deciding on an installer + package identifier for the fork.
 on:
-  release:
-    types: [ released ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Released version to publish (e.g. 2.6.1)'
+        required: true
+        type: string
+
 jobs:
   publish:
     runs-on: windows-latest
+    env:
+      WINGET_TOKEN_SET: ${{ secrets.WINGET_TOKEN != '' }}
     steps:
+      - name: Fail fast when the winget token is missing
+        if: env.WINGET_TOKEN_SET == 'false'
+        shell: pwsh
+        run: |
+          Write-Error "WINGET_TOKEN secret is not configured on this repository."
+          exit 1
       - uses: vedantmgoyal9/winget-releaser@main
         with:
           identifier: Bambulab.BambuStudio
-          version: ${{ github.event.release.tag_name }}
+          version: ${{ inputs.version }}
           token: ${{ secrets.WINGET_TOKEN }}
           installers-regex: '\.exe$'
