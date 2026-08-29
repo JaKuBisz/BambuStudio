@@ -136,7 +136,18 @@ if (MSVC)
     # per-target .pdb at compile time. /Zi breaks parallel Ninja builds
     # (fatal C1041 on the shared .pdb; /FS is not honored through sccache)
     # and cannot be compiler-cached. The linker still emits the final PDB.
-    add_compile_options(-bigobj -Zm520 /Z7)
+    add_compile_options(-bigobj -Zm520)
+    if (SLIC3R_MSVC_PDB)
+        # Generate symbols at every build target, even for the release.
+        # /Z7 (not /Zi): embeds debug info into each .obj instead of a shared
+        # per-target .pdb at compile time. /Zi breaks parallel Ninja builds
+        # (fatal C1041 on the shared .pdb; /FS is not honored through
+        # sccache) and cannot be compiler-cached. The linker still emits the
+        # final PDB. NOTE: /Z7 inflates .obj size and can push large static
+        # libraries past the 4 GiB limit (LNK1248, libslic3r_gui.lib) — keep
+        # SLIC3R_MSVC_PDB off for builds that don't ship PDBs.
+        add_compile_options(/Z7)
+    endif ()
     # Disable STL4007: Many result_type typedefs and all argument_type, first_argument_type, and second_argument_type typedefs are deprecated in C++17.
     #FIXME Remove this line after eigen library adapts to the new C++17 adaptor rules.
     add_compile_options(-D_SILENCE_CXX17_ADAPTOR_TYPEDEFS_DEPRECATION_WARNING)
