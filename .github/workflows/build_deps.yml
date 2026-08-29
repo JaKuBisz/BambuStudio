@@ -35,29 +35,37 @@ jobs:
         # No LFS objects in this repo (no .gitattributes) — skip git-lfs setup.
 
       - name: load cached deps
+        id: deps-cache
         uses: actions/cache@v5
         with:
           path: ${{ inputs.cache-path }}
           key: ${{ inputs.cache-key }}
 
+      # NOTE: the cache check job runs on ubuntu-latest, and cache entries are
+      # versioned per-OS unless cross-OS archive is enabled — so for Windows
+      # and macOS the check always reports a miss and this job always runs.
+      # When the restore above nevertheless hits, every step below is skipped
+      # and the job exits quickly (this also makes the job resilient to the
+      # race where another run populates the cache between check and build).
+
       - name: setup dev on Windows
-        if: inputs.os == 'windows-latest'
+        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
         uses: microsoft/setup-msbuild@v2
 
       - name: Get the date on Ubuntu and macOS
-        if: inputs.os != 'windows-latest'
+        if: (inputs.os != 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
         run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_ENV
         shell: bash
 
       - name: Get the date on Windows
-        if: inputs.os == 'windows-latest'
+        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
         run: echo "date=$(Get-Date -Format 'yyyyMMdd')" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
         shell: pwsh
 
 
       # Build Dependencies
       - name: Build on Windows
-        if: inputs.os == 'windows-latest'
+        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
         working-directory: ${{ github.workspace }}
         run: |
             choco install strawberryperl
@@ -69,13 +77,13 @@ jobs:
             msbuild /m ALL_BUILD.vcxproj
 
       - name: pack deps on Windows
-        if: inputs.os == 'windows-latest'
+        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
         working-directory: ${{ github.workspace }}
         run: Compress-Archive -Path "${{ github.workspace }}\deps\build\BambuStudio_dep\*" -DestinationPath "${{ github.workspace }}\deps\build\BambuStudio_dep_win64_${{ env.date }}_vs2022.zip"
         shell: pwsh
           
       - name: Fix python install error on mac
-        if: inputs.os == 'macos-15-intel'
+        if: (inputs.os == 'macos-15-intel') && steps.deps-cache.outputs.cache-hit != 'true'
         working-directory: ${{ github.workspace }}
         run: |
           find /usr/local/bin -lname '*/Library/Frameworks/Python.framework/*' -delete
@@ -85,7 +93,7 @@ jobs:
       # Compiler cache. The brew ccache package links against zstd, which the
       # mac deps build uninstalls, so use the static sccache binary instead.
       - name: Cache compiler cache (macOS)
-        if: inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26'
+        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.sccache
@@ -94,7 +102,7 @@ jobs:
             ${{ inputs.os }}-sccache-
 
       - name: Install sccache (macOS)
-        if: inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26'
+        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
         run: |
           if [ "$(uname -m)" == "arm64" ]; then SCCACHE_ARCH=aarch64; else SCCACHE_ARCH=x86_64; fi
           mkdir -p "$RUNNER_TEMP/sccache-bin"
@@ -106,7 +114,7 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=$RUNNER_TEMP/sccache-bin/sccache" >> "$GITHUB_ENV"
 
       - name: Cache compiler cache (Linux)
-        if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04'
+        if: (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ccache
@@ -115,7 +123,7 @@ jobs:
             ${{ inputs.os }}-ccache-
 
       - name: Install ccache (Linux)
-        if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04'
+        if: (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && steps.deps-cache.outputs.cache-hit != 'true'
         run: |
           if ! command -v ccache >/dev/null; then sudo apt-get update && sudo apt-get install -y ccache; fi
           echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
@@ -124,7 +132,7 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
       
       - name: Free disk space
-        if: inputs.os == 'macos-15'
+        if: (inputs.os == 'macos-15') && steps.deps-cache.outputs.cache-hit != 'true'
         run: |
           df -h
           sudo find /Applications -maxdepth 1 -type d -name "Xcode_*.app" ! -name "Xcode_15.4.app" -exec rm -rf {} +
@@ -132,7 +140,7 @@ jobs:
           df -h
 
       - name: Build on Mac ${{ inputs.arch }}
-        if: inputs.os == 'macos-15-intel'
+        if: (inputs.os == 'macos-15-intel') && steps.deps-cache.outputs.cache-hit != 'true'
         working-directory: ${{ github.workspace }}
         run: |
             brew install automake texinfo nasm yasm x264
@@ -151,7 +159,7 @@ jobs:
             brew install zstd
       
       - name: Build on Mac ${{ inputs.arch }}
-        if: inputs.os == 'macos-15' || inputs.os == 'macos-26'
+        if: (inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
         working-directory: ${{ github.workspace }}
         run: |
             brew install automake texinfo nasm yasm x264
@@ -170,7 +178,7 @@ jobs:
             brew install zstd
 
       - name: pack deps on Macos
-        if: inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26'
+        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
         working-directory: ${{ github.workspace }}
         run: |
           cd ${{ github.workspace }}/deps
@@ -178,7 +186,7 @@ jobs:
 
 
       - name: Build on Ubuntu
-        if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04'
+        if: (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && steps.deps-cache.outputs.cache-hit != 'true'
         working-directory: ${{ github.workspace }}
         run: |
             sudo ./BuildLinux.sh -ur
@@ -190,7 +198,7 @@ jobs:
 
       # Upload Artifacts
       - name: Upload Mac ${{ inputs.arch }} artifacts
-        if: inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26'
+        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@v6
         with:
           name: BambuStudio_dep_mac_${{ inputs.arch }}_${{ env.date }}
@@ -198,12 +206,12 @@ jobs:
           retention-days: 14
 
       - name: clean artifacts
-        if: inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26'
+        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
         working-directory: ${{ github.workspace }}
         run: rm -rf ${{ github.workspace }}/deps/build/BambuStudio_dep_mac_${{ inputs.arch }}*.tar.gz
 
       - name: Upload Windows artifacts
-        if: inputs.os == 'windows-latest'
+        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@v6
         with:
           name: BambuStudio_dep_win64_${{ env.date }}
@@ -211,7 +219,7 @@ jobs:
           retention-days: 14
 
       - name: Upload Ubuntu artifacts
-        if: ${{ ! env.ACT && (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') }}
+        if: (${{ ! env.ACT && (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') }}) && steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@v6
         with:
           name: BambuStudio_dep_${{ inputs.os }}_${{ env.date }}
