@@ -1,5 +1,6 @@
 #include "AboutDialog.hpp"
 #include "I18N.hpp"
+#include "libslic3r_build_info.h"
 
 #include "libslic3r/Utils.hpp"
 #include "GUI.hpp"

@@ -5,8 +5,10 @@
 #define SLIC3R_APP_KEY "@SLIC3R_APP_KEY@"
 #define SLIC3R_VERSION "@SLIC3R_VERSION@"
 #define SLIC3R_BUILD_ID "@SLIC3R_BUILD_ID@"
-#define SLIC3R_BUILD_TIME "@SLIC3R_BUILD_TIME@"
-#define SLIC3R_COMPILE_VERSION "@SLIC3R_COMPILE_VERSION@"
+// NOTE: SLIC3R_BUILD_TIME and SLIC3R_COMPILE_VERSION moved to
+// libslic3r_build_info.h — they change every build, and this header is
+// pulled into the precompiled header chain, so any change here would
+// invalidate the PCH and every compiler-cache entry for the whole codebase.
 //#define SLIC3R_RC_VERSION "@SLIC3R_VERSION@"
 #define BBL_RELEASE_TO_PUBLIC @BBL_RELEASE_TO_PUBLIC@
 #define BBL_INTERNAL_TESTING @BBL_INTERNAL_TESTING@

@@ -1,0 +1,13 @@
+#ifndef __SLIC3R_BUILD_INFO_H
+#define __SLIC3R_BUILD_INFO_H
+
+// Volatile per-build values, kept separate from libslic3r_version.h: that
+// header is pulled into the precompiled header chain, so a changing value
+// there would invalidate the PCH and every compiler-cache entry on every
+// build. Only the few files that display/log these values include this
+// header, so a new build timestamp costs a couple of recompiles, not thousands.
+
+#define SLIC3R_BUILD_TIME "@SLIC3R_BUILD_TIME@"
+#define SLIC3R_COMPILE_VERSION "@SLIC3R_COMPILE_VERSION@"
+
+#endif /* __SLIC3R_BUILD_INFO_H */

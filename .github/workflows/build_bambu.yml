@@ -186,6 +186,7 @@ jobs:
           DMG_NAME="OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}.dmg"
           STAGE_DIR=$(mktemp -d)
           cp -R "$APP_DIR/OpenStudio.app" "$STAGE_DIR/"
+          cp scripts/macos/OpenStudio-First-Run.command "$STAGE_DIR/"
           ln -s /Applications "$STAGE_DIR/Applications"
           hdiutil create -volname "OpenStudio" -srcfolder "$STAGE_DIR" -ov -format UDZO "$DMG_NAME"
           rm -rf "$STAGE_DIR"
@@ -415,6 +416,7 @@ jobs:
           DMG_NAME="OpenStudio_Mac_${{inputs.arch}}_${{inputs.os}}_${{ env.ver }}.dmg"
           STAGE_DIR=$(mktemp -d)
           cp -R "$APP_DIR/OpenStudio.app" "$STAGE_DIR/"
+          cp scripts/macos/OpenStudio-First-Run.command "$STAGE_DIR/"
           ln -s /Applications "$STAGE_DIR/Applications"
           hdiutil create -volname "OpenStudio" -srcfolder "$STAGE_DIR" -ov -format UDZO "$DMG_NAME"
           rm -rf "$STAGE_DIR"

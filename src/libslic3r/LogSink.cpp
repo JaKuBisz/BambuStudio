@@ -1,6 +1,7 @@
 #include "LogSink.hpp"
 
 #include "libslic3r_version.h"
+#include "libslic3r_build_info.h"
 
 #include "slic3r/Utils/BBLUtil.hpp"
 #include "slic3r/Utils/Http.hpp"
