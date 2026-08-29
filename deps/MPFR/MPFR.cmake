@@ -44,7 +44,10 @@ else ()
         DOWNLOAD_DIR ${DEP_DOWNLOAD_DIR}/MPFR
         BUILD_IN_SOURCE ON
         CONFIGURE_COMMAND env "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" ./configure ${_cross_compile_arg} --prefix=${DESTDIR}/usr/local --enable-shared=no --enable-static=yes --with-gmp=${DESTDIR}/usr/local ${_gmp_build_tgt}
-        BUILD_COMMAND make -j
+        # Bounded -j: a bare `make -j` spawns unbounded jobs and can exhaust
+        # process limits (fork: Resource temporarily unavailable) when several
+        # deps build concurrently (parallel top-level build, dual-arch).
+        BUILD_COMMAND make -j${NPROC}
         INSTALL_COMMAND make install
         DEPENDS ${GMP_PKG}
     )
