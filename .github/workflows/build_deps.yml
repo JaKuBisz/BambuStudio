@@ -219,7 +219,7 @@ jobs:
           retention-days: 14
 
       - name: Upload Ubuntu artifacts
-        if: (${{ ! env.ACT && (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') }}) && steps.deps-cache.outputs.cache-hit != 'true'
+        if: ${{ ! env.ACT && (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && steps.deps-cache.outputs.cache-hit != 'true' }}
         uses: actions/upload-artifact@v6
         with:
           name: BambuStudio_dep_${{ inputs.os }}_${{ env.date }}
