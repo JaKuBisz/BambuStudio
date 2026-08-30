@@ -25,10 +25,16 @@ runs:
   steps:
     - id: k
       shell: bash
-      env:
-        DEPS_HASH: ${{ hashFiles('deps/**') }}
       run: |
         set -euo pipefail
+        # git-based content hash, NOT hashFiles: hashFiles hashes the checked-
+        # out files, and Windows checkouts may have CRLF line endings — the
+        # same deps/** tree then hashes differently per OS, so platform legs
+        # can never share a key computed elsewhere (observed: ubuntu computed
+        # 20d91bc7…, windows computed 5252b38a… for identical content).
+        # git hash-object hashes the committed blobs (LF-normalized in the
+        # index) — identical on every platform and EOL-proof.
+        DEPS_HASH=$(git ls-files -z -- deps | sort -z | xargs -0 git hash-object | git hash-object --stdin)
         os="${{ inputs.os }}"
         barch="${{ inputs.barch }}"
         if [ "$barch" != "native" ]; then
