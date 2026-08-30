@@ -237,13 +237,18 @@ jobs:
           retention-days: 1
 
   # Windows
-      # Visual Studio generator (dev's f02cf3fb): Ninja+sccache was a dead
-      # end — sccache cannot cache MSVC /Yu (PCH) compilations, and the PCH'd
-      # targets are the bulk of the build. msbuild /m parallelizes fine and
-      # handles shared PDBs via /FS natively. No compiler cache on Windows.
-      - name: setup MSVC
+      # Ninja + sccache (GHA backend) + PCH off. History: Ninja itself always
+      # worked — the two failures were /Z7 (LNK1248, fixed via
+      # SLIC3R_MSVC_PDB=0) and a PCH-transitive NOMINMAX collision (fixed via
+      # /DNOMINMAX in CMakeLists.txt). The VS generator cannot be
+      # compiler-cached at all (ignores CMAKE_*_COMPILER_LAUNCHER, MSBuild
+      # resolves cl.exe from the toolset dir), so Ninja is the only path to a
+      # cached Windows build. PCH stays off: sccache can't cache MSVC /Yu.
+      # FALLBACK: if more PCH-transitive compile errors surface, revert this
+      # section to the VS generator (see dev's f02cf3fb).
+      - name: setup MSVC toolchain
         if: inputs.os == 'windows-latest'
-        uses: microsoft/setup-msbuild@v2
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install nsis and pkgconfig
         if: inputs.os == 'windows-latest'
@@ -251,6 +256,20 @@ jobs:
         run: |
           choco install nsis
           choco install pkgconfiglite
+
+      - name: Setup sccache (Windows)
+        if: inputs.os == 'windows-latest'
+        id: sccache-win
+        uses: ./.github/actions/setup-sccache-gha
+        with:
+          os: ${{ inputs.os }}
+
+      - name: Configure compiler launcher (Windows)
+        if: inputs.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=${{ steps.sccache-win.outputs.sccache-bin }}" >> $env:GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ steps.sccache-win.outputs.sccache-bin }}" >> $env:GITHUB_ENV
 
       - name: Build slicer Win
         if: inputs.os == 'windows-latest'
@@ -264,12 +283,21 @@ jobs:
           # raises C4530, which /WX targets promote to errors (C2220).
           # SLIC3R_MSVC_PDB=0: CI ships no PDBs, and embedded debug info
           # would push libslic3r_gui.lib past the 4 GiB static-library
-          # limit (LNK1248).
-          cmake .. -G "Visual Studio 18 2026" -A X64 -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DSLIC3R_MSVC_PDB=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
+          # limit (LNK1248). SLIC3R_PCH=OFF: sccache cannot cache MSVC /Yu.
+          cmake .. -G Ninja -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DSLIC3R_MSVC_PDB=0 -DSLIC3R_PCH=OFF -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build . --target install --config Release -- -m
-          # pwsh does NOT abort on native command failure — check explicitly.
+          # ForEach-Object passthrough: full output streams to the log; every
+          # 25th Ninja [done/total] line also emits a ::notice so the run
+          # summary page shows a progress trail (GHA has no native % progress).
+          $script:i = 0
+          cmake --build . --target install 2>&1 | ForEach-Object {
+            $_
+            if ("$_" -match '^\[\d+/\d+\]') { $script:i++; if ($script:i % 25 -eq 0) { Write-Host "::notice title=Build progress::$_" } }
+          }
+          # pwsh does NOT abort on native command failure — check explicitly,
+          # otherwise a failed build is masked by the stats command below.
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          sccache --show-stats
 
       - name: Pack app
         if: inputs.os == 'windows-latest'
