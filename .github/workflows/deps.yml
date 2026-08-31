@@ -1,0 +1,58 @@
+name: Build Deps
+
+# Primary entry point for dependency builds. Extracted from build_all.yml so
+# deps work gets its own concurrency group that NEVER cancels in-progress
+# builds: a cancelled 2h macOS superbuild saves nothing (actions/cache writes
+# in a post-step that doesn't run on cancellation), so rapid pushes used to
+# keep the pipeline in a permanent cold-deps loop.
+on:
+  push:
+    branches: [master, dev]
+    paths:
+      - 'deps/**'
+      - 'version.inc'
+      - '.github/workflows/deps.yml'
+      - '.github/workflows/build_deps.yml'
+      - '.github/actions/deps-cache-key/**'
+      - 'BuildLinux.sh'
+      - 'BuildMac.sh'
+      - 'build_win.bat'
+  # Nightly force-rebuild (catches silent superbuild bitrot) is implemented but
+  # DISABLED for now — the repo isn't active enough to justify a full deps
+  # rebuild every night hogging macOS runner slots. Uncomment to enable, or
+  # run manually: workflow_dispatch with force=true.
+  # schedule:
+  #   - cron: '23 2 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even when the cache hits (refreshes the cache entry)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write # force-rebuild deletes the superseded cache entry after a successful build
+
+jobs:
+  deps:
+    name: Deps (${{ matrix.os }}${{ matrix.arch != '' && format(' {0}', matrix.arch) || '' }})
+    # Nightly force builds are meaningless on any fork of this fork.
+    if: github.event_name != 'schedule' || github.repository == 'JaKuBisz/BambuStudio'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, arch: '' }
+          - { os: ubuntu-24.04, arch: '' }
+          - { os: ubuntu-26.04, arch: '' }
+          - { os: windows-latest, arch: '' }
+          - { os: macos-15, arch: universal }
+          - { os: macos-26, arch: universal }
+    uses: ./.github/workflows/build_deps.yml
+    with:
+      os: ${{ matrix.os }}
+      arch: ${{ matrix.arch }}
+      build-deps-only: true
+      force: ${{ github.event_name == 'schedule' || inputs.force || false }}
+    secrets: inherit

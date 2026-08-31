@@ -1,14 +1,15 @@
 name: 'CD: Homebrew Cask'
-run-name: "Homebrew update — ${{ github.event.release.tag_name || inputs.version || 'latest' }}"
+run-name: "Homebrew update — ${{ inputs.version || 'latest' }}"
 
+# Gated to manual dispatch: this repo currently has no HOMEBREW_TAP_TOKEN
+# secret configured, so an automatic release trigger would fail on every
+# release. Re-enable the `release: [released]` trigger once the secret exists.
 on:
-  release:
-    types: [released]
   workflow_dispatch:
     inputs:
       version:
         description: 'Version to publish (e.g. 2.6.1)'
-        required: false
+        required: true
         type: string
 
 permissions: read-all
@@ -22,8 +23,17 @@ jobs:
     name: Update Homebrew Cask
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      HOMEBREW_TAP_TOKEN_SET: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
 
     steps:
+      - name: Fail fast when the tap token is missing
+        if: env.HOMEBREW_TAP_TOKEN_SET == 'false'
+        run: |
+          echo "::error::HOMEBREW_TAP_TOKEN secret is not configured on this repository." >&2
+          echo "::error::Add it under Settings > Secrets and variables > Actions, then re-run." >&2
+          exit 1
+
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
@@ -37,31 +47,32 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"
-          else
-            VERSION="${{ inputs.version }}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version: $VERSION"
+          echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${{ inputs.version }}"
 
       - name: Get macOS asset checksum
         id: checksums
         timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="v${{ steps.version.outputs.version }}"
-          VER="${TAG#v}"
-          UPSTREAM_VER="${VER%-bj.*}"    # strip distributor suffix for filename
           BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
 
-          # build_all.yml runs BuildMac.sh with `-a universal` for the macos-15 job,
-          # which lipo-combines both arm64 and x86_64 into a single binary (see
-          # BuildMac.sh's build_universal()). That one .dmg covers every Mac, so
-          # the cask only needs this single download -- there's no separate
-          # Intel-only cask asset to track any more.
-          URL="${BASE}/OpenStudio_Mac_universal_macos-15_V${UPSTREAM_VER}.dmg"
+          # Discover the universal dmg from the release assets instead of
+          # hardcoding the runner label — the macOS runner matrix changes over
+          # time (macos-15, macos-26, ...). The universal dmg lipo-combines
+          # arm64 + x86_64, so one asset covers every Mac. When several exist,
+          # pick the lowest runner version (broadest macOS compatibility).
+          ASSET=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            --jq '[.assets[].name | select(test("^OpenStudio_Mac_universal_.*\\.dmg$"))] | sort | .[0] // empty')
+          if [ -z "$ASSET" ]; then
+            echo "::error::No OpenStudio_Mac_universal_*.dmg asset found on release ${TAG}" >&2
+            exit 1
+          fi
+          URL="${BASE}/${ASSET}"
+          echo "Selected asset: $ASSET"
 
           echo "URL=$URL" >> $GITHUB_ENV
 

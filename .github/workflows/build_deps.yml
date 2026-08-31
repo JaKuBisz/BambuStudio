@@ -1,15 +1,6 @@
 on:
   workflow_call:
     inputs:
-      cache-key:
-        required: true
-        type: string
-      cache-path:
-        required: true
-        type: string
-      valid-cache:
-        required: true
-        type: boolean
       os:
         required: true
         type: string
@@ -19,14 +10,50 @@ on:
       build-deps-only:
         required: false
         type: boolean
+      force:
+        description: 'Rebuild deps even on a cache hit; refreshes the cache entry after a successful build'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
+  prepare:
+    name: Prepare deps matrix
+    runs-on: ubuntu-latest
+    outputs:
+      barch-matrix: ${{ steps.set.outputs.barch-matrix }}
+    steps:
+      - id: set
+        run: |
+          # Universal macOS deps are built per-arch on separate runners (same
+          # split as the app build): each arch gets the runner's full vCPU set
+          # and its own cache entry (deps/build/<arch>).
+          if [ "${{ inputs.arch }}" == "universal" ]; then
+            echo 'barch-matrix=["x86_64","arm64"]' >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.arch }}" ]; then
+            echo 'barch-matrix=["${{ inputs.arch }}"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'barch-matrix=["native"]' >> "$GITHUB_OUTPUT"
+          fi
+
   build_deps:
     name: Build Deps
-    if: inputs.build-deps-only || inputs.valid-cache != true
+    needs: prepare
     runs-on: ${{ inputs.os }}
-    env:
-      date:
+    # Deps builds are expensive (up to ~2h on macOS) and a cancelled job saves
+    # NO cache (actions/cache writes in a post-step that doesn't run on
+    # cancellation) — so deps jobs must never be cancelled by concurrency.
+    # The group is per OS+arch and shared by every caller of this workflow
+    # (deps.yml and build_all.yml's fallback), so identical concurrent work
+    # queues instead of duplicating; the queued job fast-exits on the cache
+    # entry the running one just saved.
+    concurrency:
+      group: deps-${{ inputs.os }}-${{ matrix.barch }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        barch: ${{ fromJSON(needs.prepare.outputs.barch-matrix) }}
     steps:
 
       # Setup the environment
@@ -34,39 +61,78 @@ jobs:
         uses: actions/checkout@v6
         # No LFS objects in this repo (no .gitattributes) — skip git-lfs setup.
 
-      - name: load cached deps
-        id: deps-cache
-        uses: actions/cache@v5
+      - name: Compute deps cache key
+        id: deps-key
+        uses: ./.github/actions/deps-cache-key
         with:
-          path: ${{ inputs.cache-path }}
-          key: ${{ inputs.cache-key }}
+          os: ${{ inputs.os }}
+          barch: ${{ matrix.barch }}
 
-      # NOTE: the cache check job runs on ubuntu-latest, and cache entries are
-      # versioned per-OS unless cross-OS archive is enabled — so for Windows
-      # and macOS the check always reports a miss and this job always runs.
-      # When the restore above nevertheless hits, every step below is skipped
-      # and the job exits quickly (this also makes the job resilient to the
-      # race where another run populates the cache between check and build).
-
-      - name: setup dev on Windows
-        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Get the date on Ubuntu and macOS
-        if: (inputs.os != 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
-        run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_ENV
+      - name: Compute ccache weekly epoch (Linux)
+        if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04'
+        run: echo "week=$(date +'%Y-%V')" >> "$GITHUB_ENV"
         shell: bash
 
-      - name: Get the date on Windows
-        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
-        run: echo "date=$(Get-Date -Format 'yyyyMMdd')" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
-        shell: pwsh
+      # The job self-decides: restore hit -> every build step below is skipped
+      # and the job exits in seconds. This in-job probe is the only cache
+      # check — an external lookup-only probe cannot see Windows/macOS cache
+      # entries from an ubuntu runner (entries are OS-versioned).
+      - name: Restore cached deps
+        if: ${{ !inputs.force }}
+        id: deps-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.deps-key.outputs.cache-path }}
+          key: ${{ steps.deps-key.outputs.cache-key }}
 
+      - name: setup dev on Windows
+        if: (inputs.os == 'windows-latest') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
+        uses: microsoft/setup-msbuild@v2
+
+      # Compiler cache for deps builds (macOS/Linux): same backends as the app
+      # build — sccache GHA on macOS, weekly-epoch ccache on Linux. Windows
+      # deps use the VS generator (ignores CMAKE_*_COMPILER_LAUNCHER) so no
+      # compiler cache is wired there.
+      - name: Setup sccache (macOS)
+        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
+        id: sccache
+        uses: ./.github/actions/setup-sccache-gha
+        with:
+          os: ${{ inputs.os }}
+
+      - name: Configure compiler launcher (macOS)
+        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=${{ steps.sccache.outputs.sccache-bin }}" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ steps.sccache.outputs.sccache-bin }}" >> "$GITHUB_ENV"
+
+      - name: Restore ccache (Linux)
+        if: (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
+        id: ccache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ${{ inputs.os }}-ccache-w${{ env.week }}
+          restore-keys: |
+            ${{ inputs.os }}-ccache-
+
+      - name: Install ccache (Linux)
+        if: (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
+        run: |
+          if ! command -v ccache >/dev/null; then sudo apt-get update && sudo apt-get install -y ccache; fi
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          # Stats are cumulative across restored caches — zero them so the
+          # end-of-job stats reflect THIS run only.
+          ccache --zero-stats || true
 
       # Build Dependencies
       - name: Build on Windows
-        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
+        if: (inputs.os == 'windows-latest') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
         working-directory: ${{ github.workspace }}
+        shell: pwsh
         run: |
             choco install strawberryperl
             choco install pkgconfiglite
@@ -74,76 +140,35 @@ jobs:
             mkdir ${{ github.workspace }}\deps\build\BambuStudio_dep
             cd "${{ github.workspace }}\deps\build"
             cmake ../ -G "Visual Studio 18 2026" -A x64 -DDESTDIR="./BambuStudio_dep" -DCMAKE_BUILD_TYPE=Release -DDEP_DEBUG=OFF
-            msbuild /m ALL_BUILD.vcxproj
+            # One retry: deps download many tarballs from external hosts and a
+            # transient 5xx otherwise kills a ~1h job. ExternalProject resumes
+            # completed steps, so the retry only redoes what failed.
+            foreach ($attempt in 1..2) {
+              msbuild /m ALL_BUILD.vcxproj
+              if ($LASTEXITCODE -eq 0) { break }
+              if ($attempt -eq 2) { exit $LASTEXITCODE }
+              Write-Host "::warning::Deps build attempt $attempt failed (often a transient download error) - retrying in 30s"
+              Start-Sleep -Seconds 30
+            }
 
-      - name: pack deps on Windows
-        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
-        working-directory: ${{ github.workspace }}
-        run: Compress-Archive -Path "${{ github.workspace }}\deps\build\BambuStudio_dep\*" -DestinationPath "${{ github.workspace }}\deps\build\BambuStudio_dep_win64_${{ env.date }}_vs2022.zip"
-        shell: pwsh
-          
       - name: Fix python install error on mac
-        if: (inputs.os == 'macos-15-intel') && steps.deps-cache.outputs.cache-hit != 'true'
+        if: (inputs.os == 'macos-15-intel') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
         working-directory: ${{ github.workspace }}
         run: |
           find /usr/local/bin -lname '*/Library/Frameworks/Python.framework/*' -delete
           sudo rm -rf /Library/Frameworks/Python.framework/
           brew install --force python3 && brew unlink python3 && brew unlink python3 && brew link --overwrite python3
 
-      # Compiler cache. The brew ccache package links against zstd, which the
-      # mac deps build uninstalls, so use the static sccache binary instead.
-      - name: Cache compiler cache (macOS)
-        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.sccache
-          key: ${{ inputs.os }}-sccache-${{ github.sha }}
-          restore-keys: |
-            ${{ inputs.os }}-sccache-
-
-      - name: Install sccache (macOS)
-        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
-        run: |
-          if [ "$(uname -m)" == "arm64" ]; then SCCACHE_ARCH=aarch64; else SCCACHE_ARCH=x86_64; fi
-          mkdir -p "$RUNNER_TEMP/sccache-bin"
-          curl -sSL "https://github.com/mozilla/sccache/releases/download/v0.17.0/sccache-v0.17.0-${SCCACHE_ARCH}-apple-darwin.tar.gz" \
-            | tar xzf - -C "$RUNNER_TEMP/sccache-bin" --strip-components=1
-          echo "SCCACHE_DIR=$GITHUB_WORKSPACE/.sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_CACHE_SIZE=2G" >> "$GITHUB_ENV"
-          echo "CMAKE_C_COMPILER_LAUNCHER=$RUNNER_TEMP/sccache-bin/sccache" >> "$GITHUB_ENV"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=$RUNNER_TEMP/sccache-bin/sccache" >> "$GITHUB_ENV"
-
-      - name: Cache compiler cache (Linux)
-        if: (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && steps.deps-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ${{ inputs.os }}-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ inputs.os }}-ccache-
-
-      - name: Install ccache (Linux)
-        if: (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && steps.deps-cache.outputs.cache-hit != 'true'
-        run: |
-          if ! command -v ccache >/dev/null; then sudo apt-get update && sudo apt-get install -y ccache; fi
-          # Stats are cumulative across restored caches — zero them so the
-          # end-of-job stats reflect THIS run only.
-          ccache --zero-stats || true
-          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
-          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
-      
-      - name: Free disk space
-        if: (inputs.os == 'macos-15') && steps.deps-cache.outputs.cache-hit != 'true'
+      - name: Free disk space (macos-15)
+        if: (inputs.os == 'macos-15') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
         run: |
           df -h
           sudo find /Applications -maxdepth 1 -type d -name "Xcode_*.app" ! -name "Xcode_15.4.app" -exec rm -rf {} +
           sudo rm -rf ~/Library/Developer/CoreSimulator/Caches/*
           df -h
 
-      - name: Build on Mac ${{ inputs.arch }}
-        if: (inputs.os == 'macos-15-intel') && steps.deps-cache.outputs.cache-hit != 'true'
+      - name: Build on Mac (x86_64-only runner)
+        if: (inputs.os == 'macos-15-intel') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
         working-directory: ${{ github.workspace }}
         run: |
             brew install automake texinfo nasm yasm x264
@@ -153,16 +178,24 @@ jobs:
             # which compiles cmake from source (~8 min per job).
             curl -sSL https://github.com/Kitware/CMake/releases/download/v3.31.0/cmake-3.31.0-macos-universal.tar.gz | tar xz -C "$RUNNER_TEMP"
             echo "$RUNNER_TEMP/cmake-3.31.0-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
-            ./BuildMac.sh -d -x -a x86_64 -t 10.15
-            "$RUNNER_TEMP/sccache-bin/sccache" --show-stats || true
-            for arch in x86_64; do
-                (cd "${{ github.workspace }}/deps/build/${arch}" && \
-                find . -mindepth 1 -maxdepth 1 ! -name 'BambuStudio_deps' -exec rm -rf {} +)
+            # One retry: deps download many tarballs from external hosts and a
+            # transient 5xx otherwise kills a ~1h job. ExternalProject resumes
+            # completed steps, so the retry only redoes what failed.
+            for attempt in 1 2; do
+              ./BuildMac.sh -d -x -a x86_64 -t 10.15 && break
+              if [ $attempt -eq 2 ]; then exit 1; fi
+              echo "::warning::Deps build attempt $attempt failed (often a transient download error) — retrying in 30s"
+              sleep 30
             done
+            "${{ steps.sccache.outputs.sccache-bin }}" --show-stats || true
+            (cd "${{ github.workspace }}/deps/build/x86_64" && \
+            find . -mindepth 1 -maxdepth 1 ! -name 'BambuStudio_deps' -exec rm -rf {} +)
             brew install zstd
-      
-      - name: Build on Mac ${{ inputs.arch }}
-        if: (inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
+
+      # Per-arch deps build for universal targets: each matrix leg builds one
+      # arch with the runner's full vCPU set and caches deps/build/<arch>.
+      - name: Build on Mac (${{ matrix.barch }})
+        if: (inputs.os == 'macos-15' || inputs.os == 'macos-26') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
         working-directory: ${{ github.workspace }}
         run: |
             brew install automake texinfo nasm yasm x264
@@ -172,71 +205,74 @@ jobs:
             # which compiles cmake from source (~8 min per job).
             curl -sSL https://github.com/Kitware/CMake/releases/download/v3.31.0/cmake-3.31.0-macos-universal.tar.gz | tar xz -C "$RUNNER_TEMP"
             echo "$RUNNER_TEMP/cmake-3.31.0-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
-            ./BuildMac.sh -d -x -a universal -t 10.15
-            "$RUNNER_TEMP/sccache-bin/sccache" --show-stats || true
-            for arch in arm64 x86_64; do
-                (cd "${{ github.workspace }}/deps/build/${arch}" && \
-                find . -mindepth 1 -maxdepth 1 ! -name 'BambuStudio_deps' -exec rm -rf {} +)
+            # One retry: deps download many tarballs from external hosts and a
+            # transient 5xx otherwise kills a ~1h job. ExternalProject resumes
+            # completed steps, so the retry only redoes what failed.
+            for attempt in 1 2; do
+              ./BuildMac.sh -d -x -a ${{ matrix.barch }} -t 10.15 && break
+              if [ $attempt -eq 2 ]; then exit 1; fi
+              echo "::warning::Deps build attempt $attempt failed (often a transient download error) — retrying in 30s"
+              sleep 30
             done
+            "${{ steps.sccache.outputs.sccache-bin }}" --show-stats || true
+            (cd "${{ github.workspace }}/deps/build/${{ matrix.barch }}" && \
+            find . -mindepth 1 -maxdepth 1 ! -name 'BambuStudio_deps' -exec rm -rf {} +)
             brew install zstd
-
-      - name: pack deps on Macos
-        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
-        working-directory: ${{ github.workspace }}
-        run: |
-          cd ${{ github.workspace }}/deps
-          tar -zcvf "BambuStudio_dep_mac_${{ inputs.arch }}_$(date +"%Y%m%d").tar.gz" build
-
 
       - name: Build on Ubuntu
-        if: (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && steps.deps-cache.outputs.cache-hit != 'true'
+        if: (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true')
         working-directory: ${{ github.workspace }}
         run: |
             sudo ./BuildLinux.sh -ur
             sudo chown $USER -R ./
-            ./BuildLinux.sh -dfr
+            # One retry: deps download many tarballs from external hosts and a
+            # transient 5xx otherwise kills the job. ExternalProject resumes
+            # completed steps, so the retry only redoes what failed.
+            for attempt in 1 2; do
+              ./BuildLinux.sh -dfr && break
+              if [ $attempt -eq 2 ]; then exit 1; fi
+              echo "::warning::Deps build attempt $attempt failed (often a transient download error) — retrying in 30s"
+              sleep 30
+            done
             ccache --show-stats || true
-            cd deps/build
-            tar -czvf BambuStudio_dep_${{ inputs.os }}_$(date +"%Y%m%d").tar.gz destdir
 
-      # Upload Artifacts
-      - name: Upload Mac ${{ inputs.arch }} artifacts
-        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
-        uses: actions/upload-artifact@v6
+      # Force rebuilds: the previous entry is deleted only AFTER the new build
+      # succeeds, so a failed refresh never leaves the pipeline without a
+      # deps cache. actions/cache entries are immutable per key, hence the
+      # delete-before-save.
+      - name: Delete superseded deps cache entry
+        if: ${{ inputs.force }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches" \
+            -f key="${{ steps.deps-key.outputs.cache-key }}" -f ref="$GITHUB_REF" \
+            || echo "::notice::No existing entry to delete (fine on first force build)"
+        shell: bash
+
+      - name: Save deps cache
+        if: ${{ inputs.force || steps.deps-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
         with:
-          name: BambuStudio_dep_mac_${{ inputs.arch }}_${{ env.date }}
-          path: ${{ github.workspace }}/deps/BambuStudio_dep_mac_${{ inputs.arch }}*.tar.gz
-          retention-days: 14
+          path: ${{ steps.deps-key.outputs.cache-path }}
+          key: ${{ steps.deps-key.outputs.cache-key }}
 
-      - name: clean artifacts
-        if: (inputs.os == 'macos-15-intel' || inputs.os == 'macos-15' || inputs.os == 'macos-26') && steps.deps-cache.outputs.cache-hit != 'true'
-        working-directory: ${{ github.workspace }}
-        run: rm -rf ${{ github.workspace }}/deps/build/BambuStudio_dep_mac_${{ inputs.arch }}*.tar.gz
-
-      - name: Upload Windows artifacts
-        if: (inputs.os == 'windows-latest') && steps.deps-cache.outputs.cache-hit != 'true'
-        uses: actions/upload-artifact@v6
+      # Save the Linux compiler cache alongside the deps build so the app
+      # build that follows finds it warm. PR events skip the save (their
+      # merge-ref entries are unreachable from dev/master).
+      - name: Save ccache (Linux)
+        if: ${{ (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && (inputs.force || steps.deps-cache.outputs.cache-hit != 'true') && github.event_name != 'pull_request' }}
+        uses: actions/cache/save@v5
         with:
-          name: BambuStudio_dep_win64_${{ env.date }}
-          path: ${{ github.workspace }}/deps/build/BambuStudio_dep*.zip
-          retention-days: 14
-
-      - name: Upload Ubuntu artifacts
-        if: ${{ ! env.ACT && (inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-26.04') && steps.deps-cache.outputs.cache-hit != 'true' }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: BambuStudio_dep_${{ inputs.os }}_${{ env.date }}
-          path: ${{ github.workspace }}/deps/build/BambuStudio_dep_${{ inputs.os }}_*.tar.gz
-          retention-days: 14
+          path: ${{ github.workspace }}/.ccache
+          key: ${{ inputs.os }}-ccache-w${{ env.week }}
 
   build_Bambu:
     name: Build BambuStudio
     needs: [build_deps]
-    if: ${{ !cancelled() && !inputs.build-deps-only && (inputs.valid-cache == true && needs.build_deps.result == 'skipped') || (inputs.valid-cache != true && success()) }}
+    if: ${{ !cancelled() && !inputs.build-deps-only && success() }}
     uses: ./.github/workflows/build_bambu.yml
     with:
-      cache-key: ${{ inputs.cache-key }}
-      cache-path: ${{ inputs.cache-path }}
       os: ${{ inputs.os }}
       arch: ${{ inputs.arch }}
     secrets: inherit

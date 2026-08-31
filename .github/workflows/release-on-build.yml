@@ -17,8 +17,11 @@ jobs:
   prerelease:
     name: Publish Prerelease
     runs-on: ubuntu-latest
+    # Skip build-deps-only dispatches: they produce no app artifacts, and
+    # publishing an asset-less prerelease is worse than none.
     if: >
       github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.inputs['build-deps-only'] != 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -71,7 +74,8 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: |
           mkdir -p release-assets
-          find artifacts/ -type f \( -name "*.zip" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.7z" -o -name "*.exe" \) -exec cp {} release-assets/ \;
+          # Only final app packages — never intermediate deps archives.
+          find artifacts/ -type f \( -name "*.zip" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.7z" -o -name "*.exe" \) ! -name "BambuStudio_dep_*" -exec cp {} release-assets/ \;
           echo "Release assets:"
           ls -la release-assets/
 

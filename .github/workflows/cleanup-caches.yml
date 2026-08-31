@@ -1,0 +1,76 @@
+name: Cleanup Caches
+
+# Deletes Actions cache entries whose ref no longer exists (deleted branches)
+# or that are older than the staleness threshold. Caches are branch-scoped, so
+# entries on deleted refs can never be read again, yet they count against the
+# 10 GB per-repo budget and evict useful deps caches via LRU.
+on:
+  delete: # fires when a branch or tag is deleted
+  schedule:
+    - cron: '17 3 * * 1' # weekly, Monday 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      max-age-days:
+        description: 'Also delete entries not accessed in this many days (0 = only dead refs)'
+        type: number
+        default: 14
+
+permissions:
+  actions: write # required for cache deletion
+
+jobs:
+  cleanup:
+    name: Delete unreachable caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Purge caches on dead refs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAX_AGE_DAYS: ${{ github.event.inputs.max-age-days || '14' }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "delete" ]; then
+            dead_ref="${{ github.event.ref }}"
+            [ "${{ github.event.ref_type }}" = "tag" ] && prefix="refs/tags/" || prefix="refs/heads/"
+            dead_refs="${prefix}${dead_ref}"
+            echo "Single-ref cleanup for deleted ${dead_refs}"
+          else
+            # All refs whose caches are unreachable: any cache ref that does
+            # not resolve to an existing branch or tag in this repo.
+            existing=$(git ls-remote --heads --tags origin | awk '{print $2}' | sort -u)
+            dead_refs=$(
+              # refs/pull/* caches expire with the PR; leave them alone.
+              gh api repos/"$GITHUB_REPOSITORY"/actions/caches --paginate \
+                --jq '.actions_caches[].ref' | sort -u | grep -v '^refs/pull/' | while read -r ref; do
+                  echo "$existing" | grep -qxF "$ref" || echo "$ref"
+                done
+            )
+            echo "Dead refs with caches:"; echo "${dead_refs:-<none>}"
+          fi
+
+          now=$(date +%s)
+          gh api repos/"$GITHUB_REPOSITORY"/actions/caches --paginate \
+            --jq '.actions_caches[] | [.id, .ref, .last_accessed_at] | @tsv' |
+          while IFS=$'\t' read -r id ref accessed; do
+            drop=false
+            reason=""
+            if [ -n "${dead_refs:-}" ] && echo "$dead_refs" | grep -qxF "$ref"; then
+              drop=true; reason="dead ref $ref"
+            elif [ "$MAX_AGE_DAYS" != "0" ]; then
+              accessed_ts=$(date -d "$accessed" +%s 2>/dev/null || date -jf '%Y-%m-%dT%H:%M:%SZ' "$accessed" +%s 2>/dev/null || echo "$now")
+              age_days=$(( (now - accessed_ts) / 86400 ))
+              if [ "$age_days" -ge "$MAX_AGE_DAYS" ]; then
+                drop=true; reason="stale (${age_days}d >= ${MAX_AGE_DAYS}d)"
+              fi
+            fi
+            if [ "$drop" = "true" ]; then
+              echo "Deleting cache $id ($reason)"
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}" >/dev/null \
+                && deleted=$((deleted+1)) || echo "::warning::Failed to delete cache $id"
+            fi
+          done
+          echo "Done. Remaining cache usage:"
+          gh api repos/"$GITHUB_REPOSITORY"/actions/caches --paginate \
+            --jq '"entries=\(.actions_caches|length) total_mb=\([.actions_caches[].size_in_bytes]|add/1048576|floor)"'

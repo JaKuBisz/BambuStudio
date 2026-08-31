@@ -1,0 +1,53 @@
+name: Compute deps cache key
+description: >-
+  Single source of truth for the deps cache key/path per platform and arch.
+  Key format: <os>[-<arch>]-cache-bambustudio_deps-build-<hashFiles(deps/**)>.
+  Per-arch keys for macOS (x86_64/arm64 built on separate runners); per-OS for
+  the rest. macOS keys intentionally include the runner label: deps record
+  absolute SDK paths at build time, so caches cannot move between macOS runner
+  versions.
+inputs:
+  os:
+    description: 'Runner label, e.g. ubuntu-24.04, windows-latest, macos-15'
+    required: true
+  barch:
+    description: 'Build arch: native, x86_64, or arm64'
+    required: true
+outputs:
+  cache-key:
+    description: 'Full cache key including deps/** content hash'
+    value: ${{ steps.k.outputs.cache-key }}
+  cache-path:
+    description: 'Workspace-relative path to cache'
+    value: ${{ steps.k.outputs.cache-path }}
+runs:
+  using: composite
+  steps:
+    - id: k
+      shell: bash
+      run: |
+        set -euo pipefail
+        # git-based content hash, NOT hashFiles: hashFiles hashes the checked-
+        # out files, and Windows checkouts may have CRLF line endings — the
+        # same deps/** tree then hashes differently per OS, so platform legs
+        # can never share a key computed elsewhere (observed: ubuntu computed
+        # 20d91bc7…, windows computed 5252b38a… for identical content).
+        # git hash-object hashes the committed blobs (LF-normalized in the
+        # index) — identical on every platform and EOL-proof.
+        DEPS_HASH=$(git ls-files -z -- deps | sort -z | xargs -0 git hash-object | git hash-object --stdin)
+        os="${{ inputs.os }}"
+        barch="${{ inputs.barch }}"
+        if [ "$barch" != "native" ]; then
+          path="deps/build/$barch"
+          prefix="$os-$barch"
+        elif [ "$os" = "windows-latest" ]; then
+          path="deps/build/BambuStudio_dep"
+          prefix="$os"
+        else
+          # Linux deps install into deps/build/destdir; only that subtree is cached.
+          path="deps/build/destdir"
+          prefix="$os"
+        fi
+        echo "cache-key=${prefix}-cache-bambustudio_deps-build-${DEPS_HASH}" >> "$GITHUB_OUTPUT"
+        echo "cache-path=$path" >> "$GITHUB_OUTPUT"
+        echo "Deps cache: key=${prefix}-cache-bambustudio_deps-build-${DEPS_HASH} path=$path"
