@@ -200,7 +200,7 @@ then
         ${BUILD_ARGS} ${SLIC3R_EXTRA_CMAKE_ARGS:-}
     echo "done"
     echo "Building BambuStudio ..."
-    cmake --build build --target BambuStudio
+    cmake --build build --target BambuStudio -- -k ${SLIC3R_KEEP_GOING:-1}
     echo "done"
 fi
 

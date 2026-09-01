@@ -199,9 +199,16 @@ function build_slicer() {
                         -DCMAKE_INSTALL_RPATH="${DEPS}/usr/local" \
                         -DCMAKE_MACOSX_BUNDLE=ON \
                         -DCMAKE_OSX_ARCHITECTURES="${_ARCH}" \
-                        -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}"
+                        -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}" \
+                        ${SLIC3R_EXTRA_CMAKE_ARGS:-}
                 fi
-                cmake --build . --config "$BUILD_CONFIG" --target "$SLICER_BUILD_TARGET"
+                # keep-going flag is Ninja-only; default 1 = stop on first error
+                if [ "$SLICER_CMAKE_GENERATOR" == "Ninja" ]; then
+                    KEEP_GOING_ARGS="-k ${SLICER_KEEP_GOING:-1}"
+                else
+                    KEEP_GOING_ARGS=""
+                fi
+                cmake --build . --config "$BUILD_CONFIG" --target "$SLICER_BUILD_TARGET" -- ${KEEP_GOING_ARGS}
 
                 echo "Fix macOS app package ($_ARCH)..."
                 cd "$PROJECT_BUILD_DIR"

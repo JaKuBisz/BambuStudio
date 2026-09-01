@@ -137,6 +137,10 @@ if (MSVC)
     # (fatal C1041 on the shared .pdb; /FS is not honored through sccache)
     # and cannot be compiler-cached. The linker still emits the final PDB.
     add_compile_options(-bigobj -Zm520)
+    # NOMINMAX: with PCH off (SLIC3R_PCH=OFF, needed for sccache coverage),
+    # each TU includes windows.h on its own and the min/max macros collide
+    # with std::numeric_limits<T>::max() etc. (C2589 in Emboss.cpp).
+    add_compile_options(/DNOMINMAX)
     if (SLIC3R_MSVC_PDB)
         # Generate symbols at every build target, even for the release.
         # /Z7 (not /Zi): embeds debug info into each .obj instead of a shared
